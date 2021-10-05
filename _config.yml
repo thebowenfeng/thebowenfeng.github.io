@@ -51,8 +51,8 @@ baseurl: "/" # the subpath of your site, e.g. /blog
 url: "https://www.bowenfeng.tech" # the base hostname & protocol for your site, e.g. http://example.com
 favicon: "" # the favicon for your site
 
-- name: Jekyll Deploy Action
-  uses: jeffreytse/jekyll-deploy-action@v0.3.0
+name: Jekyll Deploy Action
+uses: jeffreytse/jekyll-deploy-action@v0.3.0
 
 # Yat date format
 # refer to https://shopify.github.io/liquid/filters/date/ if you want to customize this
