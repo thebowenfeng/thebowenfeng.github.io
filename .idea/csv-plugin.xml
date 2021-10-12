@@ -17,7 +17,21 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\_posts\2019-09-18-typeracer-hack.md">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\_posts\2020-01-17-markov-chatbot.md">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\_posts\2020-05-13-midfunction-hooking.md">
           <value>
             <Attribute>
               <option name="separator" value="," />
