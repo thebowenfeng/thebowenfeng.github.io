@@ -42,27 +42,30 @@ Stack integrity is everything when it comes to hooking. If you modify the stack 
 ### The victim program
 I have developed a very simple testing program for the purpose of this article. However, in practice, the workflow should be extremely similar. Here is what is looks like:
 
-    #include <iostream>
-    #include <Windows.h>
-    
-    int toHook(int myInteger) {
-        myInteger = myInteger + 5;
-        return myInteger;
-    }
-    
-    int main()
-    {
-        int value = 0;
-        while (true) {
-            if (GetKeyState(VK_SPACE) & 0x8000)
-            {
-                value = toHook(value);
-                std::cout << value;
-                std::cout << "\n";
-                Sleep(100);
-            }
+```cpp
+#include <iostream>
+#include <Windows.h>
+
+int toHook(int myInteger) {
+    myInteger = myInteger + 5;
+    return myInteger;
+}
+
+int main()
+{
+    int value = 0;
+    while (true) {
+        if (GetKeyState(VK_SPACE) & 0x8000)
+        {
+            value = toHook(value);
+            std::cout << value;
+            std::cout << "\n";
+            Sleep(100);
         }
     }
+}
+```
+
 The goal, by the end, is to hook the "toHook" function (duh) and hopefully also modify its parameter value. Right now it is incrementing the parameter by 5, let's see if we can change that to 100.
 
 ### Reversing the function
