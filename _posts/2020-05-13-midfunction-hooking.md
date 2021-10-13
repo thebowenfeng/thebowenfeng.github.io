@@ -81,11 +81,106 @@ Here is what the flow should look like
 3. In our gateway, execute all the bytes from the beginning of our function, in order to restore the stack. Typically, we would only need to execute the "stolen bytes" (bytes overwritten for our `jmp`), but in this case, all bytes needs to be overwritten, as we purposely cleaned the stack.
 4. Jump back after our `jmp` instruction, just as normal.
 
+Voila, you just performed a trampoline hook mid-function.
+
+### The technical implementation
+
 The PoC code could be found [here](https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265). However, I would encourage attempting to implement this yourself. 
 
 *The above DLL code is written to be injected into a 32-bit (x86) process. This may or may not work on a 64 bit process, due to 64 bit addresses taking up 8 bytes as opposed to 4, which means the relative jump will only work for addresses within the 4GB range.*
 
-Voila, you just performed a trampoline hook mid-function.
+We'll start with some fairly standard template code for a DLL, which defining an entry point, and creating a Thread for our code:
+
+```cpp
+BOOL APIENTRY DllMain( HMODULE hModule,
+                       DWORD  ul_reason_for_call,
+                       LPVOID lpReserved
+                     )
+{
+    switch (ul_reason_for_call)
+    {
+    case DLL_PROCESS_ATTACH:
+        CreateThread(0, 0, MainThread, hModule, 0, 0);
+        break;
+    case DLL_THREAD_ATTACH:
+    case DLL_THREAD_DETACH:
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}
+```
+Next, we need to create a function that is able to allocate a code cave and write our stolen bytes. The function is as follows:
+```cpp
+BYTE* trampoline(BYTE* src, BYTE* dest, int len) {
+    if (len < 5) return 0;
+
+    BYTE* gateway = (BYTE*)VirtualAlloc(0, len + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+
+    memcpy_s(gateway, len, src, len);
+
+    uintptr_t relativeAddr = (src + 3) - gateway - 5;
+
+    *(gateway + len) = 0xE9;
+    *(uintptr_t*)((uintptr_t)gateway + len + 1) = relativeAddr;
+
+    detour(src, dest, len);
+
+    return gateway;
+}
+```
+There are a couple things worthy of attention. First, your "length" cannot be less than 5, as that is the size of the `jmp` instructions + a 4 byte address. `VirtualAlloc` is more or less a `malloc` in C, except that it offers more control, as it is a winAPI function. We require read & write permission, hence `PAGE_EXECUTE_READWRITE`. The rest of the code is simply a matter of copying the "stolen bytes" (which is the bytes from the start of the function till the last instruction we overwritten), and then placing a jmp at the end, to jump back to the original function. 
+
+Now you may wonder what the "detour" function is doing. This is a left-over piece of code I had written for a standard function detour. It essentially just writes a `jmp` instruction and calculates the relative address to the destination. `detour` is what will modify the original function and forces it to redirect to our "hook" function. So here is the code:
+```cpp
+bool detour(BYTE* src, BYTE* dst, int len) {
+    if (len < 5) return false;
+
+    DWORD currProtect;
+    VirtualProtect(src, len, PAGE_EXECUTE_READWRITE, &currProtect);
+     
+    *(src + 3) = 0x5D; // pop ebp
+
+    uintptr_t relativeAddr = dst - (src + 4) - 5; // Relative jump offsetted by 4
+    *(src + 4) = 0xE9; // Start jump 4 bytes in
+
+    *(uintptr_t*)(src + 5) = relativeAddr;
+
+    VirtualProtect(src, len, currProtect, &currProtect);
+    return true;
+}
+```
+You may see some similarities between certain code in this function, and in the trampoline function. Most of it is fairly straightforward, `VirtualProtect` allows us to write to places in memory where we normally cannot write to. In order to restore the stack, we need to `pop ebp`, so we simply overwrite the 4th byte with `0x5D` (instruction for pop ebp). Then, at the 5th byte, we start writing our `jmp` instruction. The relative address will be 5 bytes after the `jmp` instruction, which together with the 4 byte offset, will become 9 bytes. 
+
+Finally, we need to write our hook function, which is actually the easiest part. Here is the code:
+```cpp
+typedef int(__cdecl* toHook_t) (int a1);
+toHook_t origFunc;
+
+int __cdecl hookFunc(int a1) {
+    std::cout << "Current value: " << a1;
+    std::cout << "\n";
+    return origFunc(a1 + 100);
+}
+```
+We'll define a function pointer, to the original hook function. The calling convention (in this case `__cdecl` ) is very important as it has to be consistent. Different calling conventions have different methods of cleaning the stack. Some requires the caller to clean, whilst others requires the callee. In any case, you would most likely need to perform some static analysis using IDA Pro or similar, in order to confirm a function's calling convention. The reason why we are "returning" in our hook function, is to allow the compiler to generate code **as if** we were calling the function, which means once we restore the stack, the original program will have no clue anything even happened. This is the beauty of trampoline hooking. We have the complete freedom to intercept and pass in bogus values, and the program will not have any clue. 
+
+The final step is to execute above said functions, in a main thread. Here is the code:
+```cpp
+DWORD WINAPI MainThread(LPVOID param) {
+    AllocConsole();
+    FILE* f;
+    freopen_s(&f, "CONOUT$", "w", stdout);
+
+    uintptr_t baseAddr = (uintptr_t)GetModuleHandle(L"midFuncHookVictim.exe");
+
+    origFunc = (toHook_t)(baseAddr + 0x12500);
+    origFunc = (toHook_t)trampoline((BYTE*)origFunc, (BYTE*)hookFunc, 9);
+
+    return 0;
+}
+```
+It is worth noting that we changed the address of the origFunc from its address in memory, to our gateway (as that is the return value of the trampoline). We need to ensure our hook function redirects to our gateway in order to prevent "hook recursion". In other words, if we do not specify our gateway address, the hookFunc will simply jump back to the start of the function, and we will have an infinite loop.
 
 ### Closing thoughts
 The relative ease, with just a little bit more code and attention to reversing, makes this technique a very powerful technique when it comes to dealing with "anti-cheats". Of course, as I have covered above, there are many other ways to prevent WPM aside from byte-checking, and of which are much more powerful and much harder to bypass. However, this is not to say that every single anti-tampering service is willing and able to implement more advanced checks. Byte checking is still a very prevalent techniques used by such programs, simply due to its ease of implementation, and relative efficiency. In any case, regardless of its usefulness, knowing an extra technique will not hurt anyone (maybe except the program you are attempting to modify).
