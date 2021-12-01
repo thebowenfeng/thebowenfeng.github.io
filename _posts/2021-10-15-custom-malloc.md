@@ -9,7 +9,7 @@ tags: [C, Dynamic Memory, Malloc, Heap]
 # Writing a custom malloc and free implementation using C
 
 Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under `malloc`, and just take things for granted. In this article, we will be exploring "under the hood" mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory.
-
+ 
 The project's source code can be found [here](https://github.com/thebowenfeng/memalloc).
 
 ### What is heap, malloc and free?
