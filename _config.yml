@@ -52,7 +52,8 @@ url: "https://www.bowenfeng.tech" # the base hostname & protocol for your site, 
 favicon: "" # the favicon for your site
 
 name: Jekyll Deploy Action
-uses: jeffreytse/jekyll-deploy-action@v0.3.0
+uses: jeffreytse/jekyll-deploy-action@v0.3.1
+
 
 # Yat date format
 # refer to https://shopify.github.io/liquid/filters/date/ if you want to customize this
