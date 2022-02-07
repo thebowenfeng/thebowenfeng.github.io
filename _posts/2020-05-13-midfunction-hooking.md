@@ -6,8 +6,6 @@ categories: [Projects, Reverse Engineering]
 tags: [C++, Reverse Engineering, Hacking]
 ---
 
-# Performing a mid-function trampoline hook using C++
-
 Hooking, function hooking or function detouring, refers to the act of rerouting a program's code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a "gateway" in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be **performed on the first byte** of a given function, in order to maintain stack integrity. In today's article, we will explore an alternative method in order to perform a "mid-function" trampoline hook.
 
 [Full code gist is here](https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265)

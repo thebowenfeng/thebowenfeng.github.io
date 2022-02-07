@@ -6,8 +6,6 @@ categories: [Projects, Web Automation]
 tags: [Python, Selenium, Webdrivers, Web Automation]
 ---
 
-# Using web drivers to automate typing races in Python
-
 The power of web automation is apparent, whether it is automating a tedious task, or performing automated testing on a website. However, with great power comes great responsibility. Web automation tools can be easily abused, spam being the main issue. Today we will examine the use of web automation in a slightly less nefarious manner, automating [TypeRacer](https://play.typeracer.com/) using Python, Chrome WebDriver and Selenium.
 [Full source code here](https://github.com/thebowenfeng/typeracer-hack)
 
