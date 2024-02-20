@@ -1,0 +1,1044 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" ><generator uri="https://jekyllrb.com/" version="4.3.3">Jekyll</generator><link href="https://blog.bowenfeng.xyz/feed.xml" rel="self" type="application/atom+xml" /><link href="https://blog.bowenfeng.xyz/" rel="alternate" type="text/html" /><updated>2024-02-20T02:28:33+00:00</updated><id>https://blog.bowenfeng.xyz/feed.xml</id><title type="html">Bowen’s Blog</title><subtitle>Write an awesome description for your new site here. You can edit this line in _config.yml. It will appear in your document head meta (for Google search results) and in your feed.xml site description.</subtitle><author><name>Bowen Feng</name></author><entry><title type="html">Loading encrypted shellcode at runtime - A CTF writeup</title><link href="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2023/09/09/shellcode-injection.html" rel="alternate" type="text/html" title="Loading encrypted shellcode at runtime - A CTF writeup" /><published>2023-09-09T00:00:00+00:00</published><updated>2023-09-09T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/reverse%20engineering/2023/09/09/shellcode-injection</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2023/09/09/shellcode-injection.html"><![CDATA[<p>Recently I came across a rather interesting problem during the <a href="https://www.anu.edu.au/capture-the-flag-2023">ASD CTF</a>, 
+which was jointly hosted by ANU and ASD (Australian Signals Directorate). It was a reveres engineering 
+challenge but what caught my eye was that it utilizes a somewhat sophisticated technique that many malware and
+anti-cheats/AVs use to dissuade static analysis during reverse engineering, namely, streaming (encrypted) shellcode
+directly into memory.</p>
+
+<h2 id="a-brief-primer-on-how-programs-thwart-reversing-attempts">A brief primer on how programs thwart reversing attempts</h2>
+
+<p>For the most part, we can define a program to be an executable encoded in binary form. Inside the executable is 
+a section of code (amongst other things) that gets run once the program is loaded into memory.</p>
+
+<p>Reverse engineers takes advantage of this fact and attempts to decompile code segments within
+a program in order to figure out how it works. The task of reverse engineering can be broadly classified into two forms:
+static and dynamic analysis. As the name implies, static analysis is the act of analyzing the raw bytes of a given program’s
+file on disk, whereas dynamic analysis refers to the act of analyzing a program whilst it is being
+run.</p>
+
+<p>There are numerous ways developers employ in order to dissuade their programs of being statically analyzed. Obfuscation 
+is a technique that involves masking the source code and adding “junk code” in order to make the code seem convoluted,
+thereby making it harder to reverse engineer. Another technique involves virtualizing the code itself using something like VMProtect,
+converting the code into a proprietary form, making it hard for people to decompile it into pseudocode.</p>
+
+<h2 id="what-is-shellcode-injection-and-how-does-it-work">What is shellcode injection and how does it work?</h2>
+
+<p>Not a lot of people realize but you can actually allocate executable memory. Much like how malloc allocates a section of
+memory for data, Windows’ <code class="language-plaintext highlighter-rouge">VirtualAlloc</code> and Linux’s <code class="language-plaintext highlighter-rouge">mmap</code> is able to allocate
+a section of executable memory, that is, you can run code which resides in the section of allocated memory.</p>
+
+<p>Shellcode injection relies on this fact. Raw, compiled code (shellcode) is copied into a section of 
+executable memory (injection) and can be either voluntarily or forcibly executed.</p>
+
+<h2 id="how-does-shellcode-injection-prevent-static-analysis">How does shellcode injection prevent static analysis</h2>
+
+<p>With shellcode injection, program logic does not necessarily have to exist at runtime. It is entirely possible
+to store large parts of the program logic remotely and simply load them in when necessary. The other added benefit is that
+code does not necessarily have to be computer readable. Parts of the program can be encrypted, and when needed can be dynamically
+decrypted and loaded into memory.</p>
+
+<p>Sophisticated malware and anti-cheats/AVs use a combination of both techniques to protect their code. Typically, large portions
+of the program logic is encrypted and stored on a remote server, and streamed directly into memory where it is decrypted and ran.
+This makes it impossible for anyone to analyze the distributed executable (without running them).</p>
+
+<h2 id="ctf-walkthrough">CTF Walkthrough</h2>
+
+<p>When you first decompile the main function, it’ll look something like this (note that most of the functions were unamed 
+initially and comments were added on later):</p>
+
+<p><img src="https://raw.githubusercontent.com/thebowenfeng/asdctf-2023-files/master/1.PNG" alt="main" /></p>
+
+<p>The first thing that caught my eye, which also hinted towards its mode of operation, is “// flag function” line. This means
+that <code class="language-plaintext highlighter-rouge">addr</code> is in fact a function pointer and is likely not a static function. The second thing is the <code class="language-plaintext highlighter-rouge">evp_decrypt</code> function,
+which IDA helpfully annotated for me. This implies that there is some encryption involved within this program.</p>
+
+<p>Since the return value of <code class="language-plaintext highlighter-rouge">addr</code> (<code class="language-plaintext highlighter-rouge">flag</code>) is instrumental to whether or not the CTF flag is shown, I know the key to overcoming
+this challenge relies on whatever function <code class="language-plaintext highlighter-rouge">addr</code> is pointing to.</p>
+
+<p>I was interested to know where the <code class="language-plaintext highlighter-rouge">addr</code> is coming from, so I looked up and noticed <code class="language-plaintext highlighter-rouge">add_function_to_memory</code> (again unamed at first).
+The function returns an address, which then turns out to be a function pointer, so the function must have something to do with
+loading in said function. A closer look at <code class="language-plaintext highlighter-rouge">add_function_to_memory</code> shows this:</p>
+
+<p><img src="https://raw.githubusercontent.com/thebowenfeng/asdctf-2023-files/master/4.PNG" alt="loading in the function" /></p>
+
+<p>Its now pretty obvious what the function does. It takes the buffer <code class="language-plaintext highlighter-rouge">plaintext</code> from its argument and copies its content 
+to a executable section of memory, which it also kindly allocates, then returning a pointer to said section, which is then
+later executed.</p>
+
+<p>Following this trail, I looked up the <code class="language-plaintext highlighter-rouge">plaintext</code> buffer and saw that it is passed in to evp_decrypt, which leads me to believe
+that <code class="language-plaintext highlighter-rouge">ciphertext</code> is in fact a section of encrypted shellcode. A closer look led me to <code class="language-plaintext highlighter-rouge">read_ciphertext</code> function shows that
+the encrypted shellcode is actually embedded within the executable image itself.</p>
+
+<p><img src="https://raw.githubusercontent.com/thebowenfeng/asdctf-2023-files/master/3.PNG" alt="read_ciphertext" /></p>
+
+<p>Now that I have access to the encrypted shellcode, I am faced with two options: Either I can decrypt it myself, or I can 
+intercept the decrypted <code class="language-plaintext highlighter-rouge">plaintext</code> at runtime. Option 1 ended up being a bit finnicky as I did not have the right Linux distro
+which contained the same version as OpenSSL that is used to compile this program so I ended up going with option 2. Plus,
+it is much easier to piggyback off of work that’s already been done for you anyways.</p>
+
+<p>After placing a couple breakpoints, I managed to decompile the encrypted function:</p>
+
+<p><img src="https://raw.githubusercontent.com/thebowenfeng/asdctf-2023-files/master/2.PNG" alt="flag function" /></p>
+
+<p>The program was nice enough to hardcode a large portion of the flag as a plain ASCII string, so all I had to do is trace back
+and look up a few ASCII values to complete the remainder of the flag. Alternatively, you can try to reverse the logic and 
+find a valid “key” which will result in the program spitting out the flag for you. I’ve also attached the signature for the
+key <a href="https://github.com/thebowenfeng/asdctf-2023-files/raw/master/pin.txt">here</a>. If everything goes right, the flag should look something like:</p>
+
+<p><img src="https://raw.githubusercontent.com/thebowenfeng/asdctf-2023-files/master/6.PNG" alt="final" /></p>
+
+<h3 id="final-thoughts">Final thoughts</h3>
+
+<p>This CTF challenge is a good example of a commonly used technique to protect softwares, especially distributable executables.
+If in the future you need to protect a piece of software that you are publicizing, this is certainly a very effective technique
+to have in your arsenal.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Reverse Engineering" /><category term="Reverse Engineering" /><summary type="html"><![CDATA[Recently I came across a rather interesting problem during the ASD CTF, which was jointly hosted by ANU and ASD (Australian Signals Directorate). It was a reveres engineering challenge but what caught my eye was that it utilizes a somewhat sophisticated technique that many malware and anti-cheats/AVs use to dissuade static analysis during reverse engineering, namely, streaming (encrypted) shellcode directly into memory.]]></summary></entry><entry><title type="html">Bypass code detection with polymorphic code engine</title><link href="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2022/07/26/polymorphic-engine.html" rel="alternate" type="text/html" title="Bypass code detection with polymorphic code engine" /><published>2022-07-26T00:00:00+00:00</published><updated>2022-07-26T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/reverse%20engineering/2022/07/26/polymorphic-engine</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2022/07/26/polymorphic-engine.html"><![CDATA[<p><a href="https://github.com/thebowenfeng/PolymorphicEngine">Link to project on github</a></p>
+
+<p>Recognizing malware is one of, if not the most important part of 
+protection software such as Anti-Virus or Anti-Cheat softwares. Much like
+how the human immune system works, these softwares will often look for
+identifiable features of suspected programs, which can then by used to
+identify future copies of the same program. Today we will be looking at
+techniques which effectively bypass code detection by utilizing 
+polymorphic code via a polymorphic code engine.</p>
+
+<h2 id="brief-overview-of-how-anti-virus-software-work">Brief overview of how anti-virus software work</h2>
+
+<p>Before we get into how polymorphic code works, it is important to
+rationalize the importance of polymorphism, by recognizing how most
+anti-virus/anti-cheat software work.</p>
+
+<p>Amongst other things, one of the jobs of an AV is to recognize malware.
+Modern AV is quite sophisticated in its ways of malware detection, but 
+one of the main ways it is able to retain memory of a particular malware, so
+that it can recognize the malware in case it pops up in the future, is by utilizing
+a technique called <strong>signature scan</strong>. It is a very old, yet very
+effective method of recognizing malware and it is what polymorphic code
+aims to combat.</p>
+
+<h3 id="so-what-is-signature-scanning">So what is signature scanning?</h3>
+
+<p>A lot of what anti-virus does draws parallels with the human immune system.
+One of the primary ways our immune systems is able to recognize viruses is
+because it has seen it before. In other words, once the immune system
+sees a virus, it’ll remember its key characteristics so that next time,
+if the same virus shows up, it’ll know what it is and is able to effectively
+target it.</p>
+
+<p>In the same way, <strong>signature scanning</strong> is all about “remembering” what different
+programs looks like so that anti-virus softwares can identify certain malware.
+In this case, anti-virus will typically use a program’s code to identify it.</p>
+
+<p>In practice, typically what will happen is once a malware is identified by someone,
+most likely a researcher, the person who identified it will publish the malware’s
+signature. This could be the hash of the program’s binary content, or specific
+lines of code that the person thinks can uniquely identify this piece of malware.
+The signature will then be published to some sort of database, and once an anti-virus
+sees a program that matches the signature, it can then promptly remove the malware. It is
+fast, efficient and most importantly easy to distribute without having
+to perform manual updates to the anti-virus.</p>
+
+<p>Similarly, anti-cheat softwares works the same way, except that instead of identifying 
+malware, it primarily targets cheating software.</p>
+
+<h2 id="how-does-polymorphic-code-defeat-signature-scanning">How does polymorphic code defeat signature scanning</h2>
+
+<p>Polymorphism comes from a greek word, meaning “many shaped”. It is a rather
+widely used term in Computer Science and software development. In this particular case,
+what polymorphism, or polymorphic code means, is a program that can alter
+its own code.</p>
+
+<p>This poses a serious threat to the aforementioned technique of signature scans. If
+an anti-virus relies on signatures to detect a piece of malware, then if the malware
+changes its code (and thereby its own signature), then it suddenly becomes a brand new
+program and the anti-virus is none the wiser. If the malware developer can
+somehow automate the process, in other words develop a polymorphic code engine, then the malware
+can essentially evade signature scans indefinitely by just keep mutating
+itself once its been detected.</p>
+
+<p>That being said, mutating code is not easy. The key challenge is to
+change the code without changing its behaviour. To be more specific, 
+imagine writing a piece of code. Now someone asks you to write that same piece of code,
+but in an entirely different way. Now imagine if you have to do it again, and again, eventually
+you will most likely run out of ways. This is what a polymorphic code engine has to do, which is
+why writing a <strong>good</strong> polymorphic engine is extremely difficult. That being said,
+I will discuss a relatively simple method of mutating code.</p>
+
+<h2 id="how-does-simple-polymorphic-engine-work">How does simple polymorphic engine work</h2>
+
+<p>At its core, this polymorphic engine seeks out functions that are
+not reachable from the code’s entry point, and mutate them with random bytes.</p>
+
+<p>Some compilers (such as Microsoft’s MSVC) will bake in certain functions,
+such as functions that interact with the OS, into every program. Not every one
+of these functions will be actually utilized, so when they aren’t, they are
+effectively junk code, which means changing them will not actually affect
+the program’s behaviour. Furthermore, users can deliberately write so called “junk functions”,
+into their own program to facilitate code polymorphism.</p>
+
+<p>The way the engine knows which functions are junk, is by tracing 
+every possible paths from the program’s entry point. It will then
+disassemble the program, iterate over every identified function
+and checks against the list of functions that was traced previously.
+If a given function is not in the list of traced functions, then we can
+safely assume that this function is not used, and mutate it.</p>
+
+<h3 id="shortcomings">Shortcomings</h3>
+
+<p>Although this method is relatively easy to implement, its major shortcoming
+is that it actually doesn’t mutate every function. Any signatures built
+on any function that is actually being used (and hence not mutated) is still going
+to be valid.</p>
+
+<p>However, in practice, most anti-virus often build multiple signatures against
+a single binary, and will not typically aggressively target a binary for matching
+only one or two signatures. This means that even mutating a couple signatures is
+sometimes enough for a malware or program to “fly under the radar”.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Reverse Engineering" /><category term="C++" /><category term="Hacking" /><category term="Reverse Engineering" /><summary type="html"><![CDATA[Link to project on github]]></summary></entry><entry><title type="html">Decentralized peer-to-peer chatting using Python</title><link href="https://blog.bowenfeng.xyz/projects/web3.0/2022/02/07/p2p-chat.html" rel="alternate" type="text/html" title="Decentralized peer-to-peer chatting using Python" /><published>2022-02-07T00:00:00+00:00</published><updated>2022-02-07T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/web3.0/2022/02/07/p2p-chat</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/web3.0/2022/02/07/p2p-chat.html"><![CDATA[<p>Decentralization, and with it peer-to-peer (p2p), technologies has
+gradually become more popular with the advent of “Web 3.0”. This
+project aims to utilize several key concepts, such as UDP hole 
+punching and signalling/rendezvous servers to implement a p2p
+chatting application using Python.</p>
+
+<h2 id="what-is-peer-to-peer-p2p">What is peer to peer (p2p)</h2>
+
+<p>Peer to peer communication is a form of decentralized communication.
+Traditionally, communication relied on the familiar client-server model, where 
+each client sends messages to a central server and it is the role of the server
+to broadcast messages to the appropriate client/clients. However, in a peer to
+peer model, the idea is to bypass the need for a central server. Each client will
+directly communicate with the desired recipient. How you may ask? This is where UDP
+hole punching comes in.</p>
+
+<p><a href="https://github.com/thebowenfeng/Python-P2P-Chat">Project link/source code</a></p>
+
+<h2 id="what-is-nat-and-udp-hole-punching">What is NAT and UDP hole punching</h2>
+
+<p>The main obstacle when it comes to trivial p2p communication is NAT, or network
+address translation. To summarize, NAT is a method of binding several private
+IP addresses (individual devices) to one public IP address (router), in order
+to conserve IP addresses. Instead of each device having its separate public IP,
+different devices connect to one router, who has one public IP, and incoming traffic
+is handled by NAT, who forwards the right packets to the right computers.</p>
+
+<p>Obviously, this poses a problem if an external client wishes to initiate a connection
+with a device connected to the network. The remote device can only see the public IP,
+under which multiple “internal” devices could be connected to (think a home router with
+different devices). This problem could be mitigated by use of a signalling server
+(or a rendezvous server), which essentially acts as an exchange medium between
+two devices wishing to communicate with each other (will elaborate later). 
+However, this brings us to the second problem, which is firewalls.</p>
+
+<p>As you may expect, routers cannot, and should not be, accepting random data sent
+from unknown external computers, which is the purpose of firewalls. Firewalls are 
+designed to protect the network against possible attacks. As such, (most) NATs are designed
+to stop unsolicited communication from external sources.</p>
+
+<p>There are four main types of NATs: Full-cone, address-restricted cone, port-restricted cone,
+and symmetric NAT (<a href="https://en.wikipedia.org/wiki/Network_address_translation">details</a>). UDP hole punching works with all the above configurations 
+except for symmetric NAT (which is only typically used in large scale corporate network),
+and as such will not be discussed.</p>
+
+<p>Full-cone NAT is where an internal IP:port is mapped to an external IP:port, and 
+any traffic sent to said external IP:port will be sent to the internal device. 
+As you can imagine, this configuration is not very secure, and as such most modern
+routers opts to use either address or port restricted cone NAT.</p>
+
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/44/Full_Cone_NAT.svg/400px-Full_Cone_NAT.svg.png" alt="Full cone NAT" /></p>
+
+<p>Both address and port restricted cone NATs operate under the same premise, albeit
+with slight differences. Both NATs will only allow packets sent to an IP:port if
+an internal device has previously voluntarily sent a packet to the sender. In other words,
+B can only talk to A if A have previously talked to B. The only difference between
+an address and a port restricted cone NAT is that an address restricted cone NAT allows
+inbound traffic from any port as long as an internal device has previously sent a packet
+to the host. Whereas in a port restricted cone NAT, the inbound traffic have to be
+from the correct host <strong>and</strong> correct port. If A sent a packet to B’s port 5000, then B can only
+talk back to A if B sent its traffic through its own port 5000.</p>
+
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Restricted_Cone_NAT.svg/400px-Restricted_Cone_NAT.svg.png" alt="Address restricted cone NAT" />
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Port_Restricted_Cone_NAT.svg/400px-Port_Restricted_Cone_NAT.svg.png" alt="Port restricted cone NAT" /></p>
+
+<p>This work great in a typical use case,
+such as web browsing, as it allows inbound traffic <strong>if and only if</strong> the user 
+voluntarily requested for it. However, this makes p2p communication challenging,
+as the <strong>receiver</strong> has to <strong>initiate</strong> the communication process in order for it to work.
+Or, to put it simply. if A want to talk to B, then B has to somehow magically know that
+A wishes to talk (the magic is known as a signalling server), and initiate the conversation <strong>first</strong>.</p>
+
+<p>So where does UDP hole punching comes in?</p>
+
+<p>UDP hole punching refers to fact that the receiver has to “talk first”. It is a technique
+where the recipient sends a single UDP packet to the sender in order to “punch a hole” in the firewall,
+in order for the sender to be able to send information to the recipient. Why UDP you may ask? Isn’t UDP
+horrible? In this case, because of the fact UDP does not expect a response (unlike TCP), 
+it is perfect for the initial “hole punch” process, as the hole punching packet does not need
+a response. <img src="https://i.pinimg.com/736x/53/3d/89/533d891d1f54a2481d5fb14d31ec7f29.jpg" alt="UDP vs TCP" />
+As mentioned above, this technique relies on some magical intuition from the receiver 
+that someone is wants to talk to them, as the receiver has to initiate the punch. 
+This leads to the purpose of a signalling server</p>
+
+<h2 id="what-is-a-signalling-server">What is a signalling server</h2>
+
+<p>Sadly, mind reading does not exist in this world (at least yet), which means 
+decentralized p2p cannot be 100% decentralized, due to aforementioned problems. 
+However, if one is to look past this slight inconvenience, signalling servers
+is a great way to overcome the lack of magic.</p>
+
+<p>To put simply, signalling server (or a rendezvous server) is a way for two clients
+to express their intent to talk to each other, but not actually talk to each other. 
+Although it is a form of centralization, the server merely captures <strong>intent</strong> 
+to communicate, rather than the actual content of communication, which is of course
+transmitted directly via p2p.</p>
+
+<p>If A wishes to talk to B, then A could make an “offer” via the signalling server. 
+All clients would be constantly listening/subscribed to the signalling server, so B should 
+receive the offer from A. From the on, B could initiate a UDP hole punch using information
+in the offer (such as sender/receiver IP, and sender port, which is the port to punch), whilst 
+providing an answer to the offer to the signalling server. A would then receive 
+answer via the signalling server (with information such as receiver listening port), 
+and assuming the UDP hole punch is successful, could begin communicating with B.</p>
+
+<h2 id="how-does-this-all-work-together">How does this all work together</h2>
+
+<p>In this project, we will be using Python sockets and firebase-firestore as the signalling
+server (due to its event listening capabilities). The workflow will look something like this:</p>
+
+<ol>
+  <li>Client A and Client B both initiate program and begin to listen for offers directed to them (from firebase)</li>
+  <li>Client A wishes to send Client B a message (knowing their IP). Client A makes an offer with sender’s IP, receiver’s IP and sender’s port that will be punched (subsequently the port that A will communicate on)</li>
+  <li>Since Client B is listening to firebase, they should receive the offer almost instantaneously, and using the information in the offer, initiate a UDP hole punch wherein Client B sends a single UDP packet to Client A on the port specified by A.</li>
+  <li>After punching has been completed, Client B will respond to the offer by providing an answer with the port that it will be listening on</li>
+  <li>A will receive the answer, and begins the communication with B.</li>
+</ol>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>Decentralized p2p communication is an exciting technology as it bypasses the need 
+for a remote, central server in a world with ever-growing privacy concerns. 
+This project aims to provide a basis for any application that requires communication,
+by providing an alternative as opposed to the standard server-client model.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Web3.0" /><category term="Python" /><category term="Network" /><category term="Peer2Peer" /><category term="Decentralize" /><category term="Firebase" /><summary type="html"><![CDATA[Decentralization, and with it peer-to-peer (p2p), technologies has gradually become more popular with the advent of “Web 3.0”. This project aims to utilize several key concepts, such as UDP hole punching and signalling/rendezvous servers to implement a p2p chatting application using Python.]]></summary></entry><entry><title type="html">Using CNNs to autonomously play videogames</title><link href="https://blog.bowenfeng.xyz/projects/ai/computer%20vision/2022/01/07/ai-gamer.html" rel="alternate" type="text/html" title="Using CNNs to autonomously play videogames" /><published>2022-01-07T00:00:00+00:00</published><updated>2022-01-07T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/ai/computer%20vision/2022/01/07/ai-gamer</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/ai/computer%20vision/2022/01/07/ai-gamer.html"><![CDATA[<p>Using AI to play videogames has been nothing new. For instance, OpenAI’s OpenAI Five
+famously defeated the world champions of “Dota 2”, a team based MOBA game, in 2018.
+However, typically, videogame AIs use something called ‘Reinforcement Learning’. Essentially,
+each action the AI takes is given a certain reward. For instance, 
+if the AI kills an enemy, it will be rewarded as it is a desirable action.
+The agent (AI) seeks to maximize its rewards, and thereby producing a set of actions that
+will allow it to “play” the game.</p>
+
+<p>However, one major downside of such an approach is the difficult nature of acquiring
+input information. In most cases, the AI must have access to the game’s internal states,
+often via an external API or be hard-coded into the game itself. Unlike humans, who interpret
+the information using our eyes, the AI needs to be told exactly what those information
+are. Using Computer Vision is not exactly easy either, due to the 
+computationally costly nature using technologies such as object detection or
+OCR to recognize information from a screencap.</p>
+
+<p>This begs the question, could we instead turn this problem into a classification task?
+Humans provide footage of gameplay, categorized by actions (such as pressing a certain key),
+and the AI simply has to recognize the pattern behind each action.</p>
+
+<p>The project source code can be found <a href="https://github.com/thebowenfeng/SmartGamer">here</a>.</p>
+
+<p>Here is a demo of the project on Subway Surfers</p>
+
+<p><a href="https://www.youtube.com/watch?v=usccShMAR18"><img src="http://img.youtube.com/vi/usccShMAR18/0.jpg" alt="Video" /></a></p>
+
+<h1 id="what-is-cnns-and-how-is-it-applicable">What is CNNs and how is it applicable</h1>
+
+<p>CNN, or Convolutional Neural Network, is a neural network architecture
+specifically designed for image recognition tasks, inspired by the biological
+features of our very own eyes. It works by looking at small sections of the image,
+called “kernel”, as opposed to the entire image at once. The benefit of doing this 
+is that, instead of “memorizing” the image, CNNs can actually identify sub-features
+of an image for better recognition. Sub-features include things like edges, surfaces etc,
+which will be important to us later on.</p>
+
+<p>In our case, we simply need to provide plenty of footage (more the better), and label
+each frame with a specific action. For example, in Subway Surfers (a parkour game), 
+possible actions include going left, right, jumping or ducking. The idea is that when we,
+say, go left because there is an obstacle in front of us, the AI will hopefully 
+learn this pattern and will perform a similar action when faced with a similar circumstance.</p>
+
+<p>In this case, we will use RESNET18, which is a pre-trained CNN that is 18 layers deep,
+hence “18”. Using pre-trained CNNs has the benefit of retaining their capabilities
+of identifying basic features, such as edges/surfaces, which is contained in
+the earlier layers of the network, and only needing to retrain the latter “higher level” layers
+responsible for gathering the higher level features. This will not only save us
+massive computational costs (compared to training a brand new network) but also
+provide higher accuracy and faster recognition.</p>
+
+<h1 id="what-does-the-ai-actually-see">What does the AI actually “see”?</h1>
+
+<p>As you may or may not know, color in computers is stored as RGB values, or
+Red Green Blue values. Each color pixel is represented by a mixture of these 3
+primary colors, hence giving us all the wonderful colors we can see. However, for a CNN, 
+color image is not good news, as it requires more computational power. For a black and white
+image, one only needs to store the brightness of each pixel (from black to white), as opposed to
+the three (RGB) values required for each pixel for a color image, and more 
+information means longer time to process for our AI.</p>
+
+<p>However, in the real world, often times color does make a massive difference in terms of
+image recognition. A different color can sometimes mean an entirely new object. However, 
+in our case (and in a lot of videogames), which is Subway Surfers, color does not matter. 
+We care more about the shape of objects, much more than the colorful decoration. So, the most
+obvious thing for us to do is to make the image black and white.</p>
+
+<p>But we don’t have to stop here. There are a lot of unnecessary information
+in the image that are not strictly relevant to the ability to play the game.
+In our case, things like graffiti on the train are merely decoration, and their 
+existence generates unnecessary pixel information for our network to process. 
+In fact, we only really need to capture the shape of each train carriage or obstacle
+in order to play the game. How do we do that? In comes Canny edge detection algorithm.</p>
+
+<h3 id="what-is-canny-edge-detection-algorithm">What is Canny edge detection algorithm</h3>
+
+<p>The canny algorithm is just as its name, it can detect edges in an image.
+For example, here is an image processed using the Canny algorithm:</p>
+
+<p><img src="https://docs.opencv.org/3.4/canny1.jpg" alt="Canny" /></p>
+
+<p>Without going into a 20-page essay on the algorithm, we can in fact
+fine tune this algorithm on the amount of detail it captures using two
+parameters, the lower and upper threshold. In general, the smaller the difference
+between the two thresholds, the less information is captured.</p>
+
+<p>So now we face an interesting dilemma. Obviously, less detail in the picture
+means better and faster processing, which is crucial for such a fast paced game like 
+Subway Surfers. However, there isn’t really much point if all the AI can see is a black picture
+with a few lines here and there. The idea is to capture just enough information 
+for the AI to make an informed decision, but not too much information in order to speed up
+the decision-making time of the AI.</p>
+
+<h1 id="training-and-result">Training and result</h1>
+
+<p>With the image processing sorted, all we have to do is provide some training
+footage for the AI to learn from. If you want to check out the scripts I used to
+capture image and categorize them, I have neatly packaged my code into a easy-to-use 
+library with a single Class that performs all the necessary functions to train the AI to
+play your favorite game, <a href="https://github.com/thebowenfeng/SmartGamer">project link here</a>.</p>
+
+<p>Of course, the results will strongly depend on the difficulty of the game in question. In my case,
+the AI was able to perform basic evasive maneuvers just after around 20 recorded games.
+It starts to show signs of strategy (such as collecting powerups and coins) after around 40
+recorded games, and advanced strategy (such as choosing empty lanes to avoid dead-ends) after
+roughly 50 or so games.</p>
+
+<p>The performance of the network is quite decent. On average, the network had a 
+85% - 90% validation accuracy, and it takes around 70 - 90 milliseconds to process and 
+classify each individual image. In the end, the AI managed to achieve, on average, 3000
+points, which is a respectable score when I can typically only achieve 15,000, taking into
+the processing delay of the AI.</p>
+
+<h1 id="conclusion">Conclusion</h1>
+
+<p>Whilst reinforcement learning has become the ubiquitous and “gold standard” way
+of training AI to play games, this project demonstrates that there are often more than
+one way to approach a problem.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="AI" /><category term="Computer Vision" /><category term="Python" /><category term="AI" /><category term="Videogames" /><category term="CNN" /><category term="CV" /><summary type="html"><![CDATA[Using AI to play videogames has been nothing new. For instance, OpenAI’s OpenAI Five famously defeated the world champions of “Dota 2”, a team based MOBA game, in 2018. However, typically, videogame AIs use something called ‘Reinforcement Learning’. Essentially, each action the AI takes is given a certain reward. For instance, if the AI kills an enemy, it will be rewarded as it is a desirable action. The agent (AI) seeks to maximize its rewards, and thereby producing a set of actions that will allow it to “play” the game.]]></summary></entry><entry><title type="html">Writing a custom malloc and free implementation using C</title><link href="https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html" rel="alternate" type="text/html" title="Writing a custom malloc and free implementation using C" /><published>2021-10-15T00:00:00+00:00</published><updated>2021-10-15T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html"><![CDATA[<p>Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under <code class="language-plaintext highlighter-rouge">malloc</code>, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory.</p>
+
+<p>The project’s source code can be found <a href="https://github.com/thebowenfeng/memalloc">here</a>.</p>
+
+<h3 id="what-is-heap-malloc-and-free">What is heap, malloc and free?</h3>
+<p><img src="https://i.kym-cdn.com/photos/images/newsfeed/001/909/636/a8c.png" alt="magic words" /></p>
+
+<p>For anyone who is unfamiliar with C, or just dynamic memory in general, the <strong>heap</strong> is simply a section in memory that is reserved for you, the programmer, to put stuff in it. You can imagine it as an invisible, flexible global array that you can read/write anytime, anywhere, within your program. The heap is not to be confused with the heap data structure, they are completely two different concepts. Whereas the “stack” is built using a stack data structure, the heap is <strong>not</strong> built using a heap data structure.</p>
+
+<p>Malloc, then, would simply be a function that allocates (reserves) some memory on the heap for you, should you need it. For instance, if I need to store an integer on the heap, I would simply call <code class="language-plaintext highlighter-rouge">malloc</code>, give it the size of an integer, and <code class="language-plaintext highlighter-rouge">malloc</code> will give me a pointer, pointing to the location of my integer variable. Of course, malloc isn’t restricted to only basic datatypes. For instance, you could also malloc custom structs.</p>
+
+<p>Free is the anti-malloc. Whereas malloc reserves memory space for you, <code class="language-plaintext highlighter-rouge">free</code> takes away that reservation and returns memory back to the OS. Obviously once we no longer need something that we malloc’d on the heap, it would be ideal that we “throw away” that variable and let something else use the available space. If we do not, then a “memory leak” would occur, where your program will continuously consume memory until your OS crashes.</p>
+
+<h3 id="memory-fragmentation-and-the-difficulty-of-a-good-malloc-algorithm">Memory fragmentation and the difficulty of a good malloc algorithm</h3>
+<p>So imagine if we had a global, array of bytes (char) that act as our very own heap. Since it is global, functionally speaking, it would be very similar to the actual heap, where we can access it anywhere in our program and store information on it.</p>
+
+<p>Now imagine if we have a naive malloc algorithm that simply linearly scan through the heap, start to finish, and chuck things in there if it finds a big enough space. Similarly, the free algorithm will simply overwrite existing bytes with null bytes if needed.</p>
+
+<p>Now, say we want to store a variable of size 5 bytes to the heap. Since the heap is empty, the algorithm simply put it at the start of the heap, like this:</p>
+
+<p><img src="https://i.imgur.com/tu9gi4u.png" alt="First heap assign" /></p>
+
+<p>Ok great, now we want, let’s say, 3 bytes of data on the heap. Logically, the algorithm will scan through the heap, go to the end of the 5 bytes data, and put the 3 bytes there, like this.
+<img src="https://i.imgur.com/rfSpaCB.png" alt="Second heap assign" /></p>
+
+<p>Now, let’s say we want to have, another 5 bytes assigned. So we put it after the 3 bytes, like this:
+<img src="https://i.imgur.com/nxOrmWf.png" alt="Third heap assign" /></p>
+
+<p>Now the interesting stuff happens. We want to <em>free</em> the middle “3 bytes” of data. Okay, fairly straightforward, we simply nullify the 3 bytes of data.</p>
+
+<p><img src="https://i.imgur.com/cnNAOPP.png" alt="Free 3 bytes" /></p>
+
+<p>Some of you might already know where I’m going with this (hint: memory fragmentation) but to solidify my point, let’s now attempt to assign 10 bytes of data.</p>
+
+<p>The algorithm scans through the heap, finds the 3 bytes of free space. <strong>However</strong>, because it is too small to contain the 10 bytes of data, it gives up and continues on until the very end, and put the 10 bytes <strong>after</strong> the last 5 bytes of data, like this:</p>
+
+<p><img src="https://i.imgur.com/BvyDyBl.png" alt="Fragmentation" /></p>
+
+<p>So, now we basically have this 3 byte gap in the memory, which will forever remain there unless something smaller or equal than 3 bytes is to be assigned to the heap.</p>
+
+<p>This is called <strong>memory fragmentation</strong>, where memory in your program allocated in non-contiguous (continuous) blocks, essentially leaving unusable gaps in-between. In other words, not utilizing the full capacity of your memory, or wasting memory. It is a very fundamental problem that malloc has to solve in order to be space efficient.</p>
+
+<p>In order to solve this, there are two basic methods:</p>
+<ol>
+  <li>You could dynamically re-organize the heap once something is free’d. In our case, we would push the 2nd “5 byte” data backwards in order to fill in the gap.</li>
+  <li>You could store data non-contiguously. In our case, for the 10 byte data, we could store 3 bytes of it in the tiny gap, and the rest (7 bytes) after, with information linking the two “blocks” together.</li>
+</ol>
+
+<p><img src="https://i.imgur.com/gAdJzwn.png" alt="Method 2" />
+(Diagram demonstrating method 2)</p>
+
+<p>The first method is inefficient, slow, and impractical. If we forget the computational resource needed to re-organize the heap, changing the location of data means we also have the change the location of the pointers allocated to those data, otherwise the pointers will be pointing at garbage value.</p>
+
+<p>The second method is a bit slow, requires extra space, but much faster than the first alternative, and completely solves memory fragmentation. Most modern compilers will use a similar idea (in terms of dividing memory into blocks and looking for free blocks/reserving blocks), and it will be the basis for my own malloc algorithm.</p>
+
+<h3 id="the-malloc-algorithm">The malloc algorithm</h3>
+
+<p>As discussed above, the core concept behind this algorithm is to divide memory into blocks. One piece of data could be split between multiple blocks, and linked together using a linked list. When reading/writing the data, we simply need to traverse the linked list.</p>
+
+<p>Each memory block will contain the following data:</p>
+<ul>
+  <li>Address: The index location of the first byte on the heap covered by the current block. Remember, the heap is simply a char array.</li>
+  <li>Size: The size of the current memory block. In other words, how many bytes does this block cover.</li>
+  <li>Next: A pointer to the next block, should a piece of data be split between multiple blocks. This can be NULL.</li>
+  <li>isFree: A flag variable that marks whether or not this memory block is free to be used, or reserved for something.</li>
+</ul>
+
+<p>In this case, malloc would be responsible for assigning, creating and splitting memory blocks, so it is the most complicated part of the entire project. For each memory block encountered, there are three possibilities:</p>
+<ol>
+  <li>The given data is bigger than the memory block’s capacity</li>
+  <li>The given data is smaller than the memory block’s capacity</li>
+  <li>The given data has the same size as the memory block’s capacity</li>
+  <li>No free memory block exists.</li>
+</ol>
+
+<h4 id="case-3-same-size">Case 3 (same size)</h4>
+
+<p>Let’s start off with the simpliest case, where the given data perfectly matches the size of a memory block. In this case, our work is easy. We simply need modify the heap at the address (see block struct definition above), with the size of the block. Nullify the next pointer of the block, as the data is only contained in this block alone, and return the address of the block.</p>
+
+<h4 id="case-4-no-free-block">Case 4 (no free block)</h4>
+
+<p>This case is also relatively easy to handle. This means that every single memory block is filled/reserved, and we need to create a new memory block. We would simply need to find the “max address”, or the block that is the furthermost to the right of the heap (as the heap is filled from left to right), then create a new block that is right after the last block. The size of the block will be the data size, and obviously next pointer will be NULL. Return the address, and add the block to a global memory block array (or you can malloc it on the heap but that’s a bit ironic, considering we are trying to write our own malloc).</p>
+
+<h4 id="case-1-bigger-than">Case 1 (bigger than)</h4>
+
+<p>Now we move onto a more interesting case. What if the data size is bigger than the size of the current memory block? Well, as demonstrated in the example scenario above (10 bytes scenario), we would simply “split” the data into 2 parts. The first part would be stored in the current memory block, and the next part would be stored in the next available position. Except there is one more important detail: The “next” part can also be subsequently split, if the next available memory block has a smaller size than the “next” part. So, for instance, in our above example, let’s say the next available memory block is also 3 bytes, then the remaining “7 bytes” would be again split into 3 bytes, and now the remaining would be 4 bytes.</p>
+
+<p>In the actual program, once we have found an available memory block, we would copy the first N bytes of the data into the heap, at the current given address. Then, we would have a marker variable that marks the start of the 2nd (next) partition, essentially, splitting the data into 2 parts. The function will then continue scanning for memory blocks until it finds another free one (or cannot find one, in which case we go to <strong>Case 4</strong>), and applies the same processes depending on the circumstances. The partition could either be split into 2 partitions again, or it could be stored entirely in a block that’s big enough (<strong>Case 2 or 3</strong>). In any case, we would also need to link the current memory block to the next memory block. We can accomplish this by saving the current memory block somewhere, and when we do find an appropriate block, edit the saved block and link it.</p>
+
+<p>Basically, we “recursively” apply the function to the 2nd partition (except there is no need for actual recursion), until we have successfully stored all parts of the data.</p>
+
+<h4 id="case-2-smaller-than">Case 2 (smaller than)</h4>
+
+<p>This is, in my opinion, the most interesting and also the most complicated case. What if our data is smaller than the current block’s capacity? Well, I suppose you could just store it in there and call it a day, but doing so will defeat the purpose of the entire algorithm, as it will cause memory fragmentation. The “leftover” bits in the block will be sitting there, inaccessible to any other data as the entire block is reserved.</p>
+
+<p>So, the solution is to split the block. You might be observing a pattern here. Previously, we split the data because it is bigger, now we split the actual memory block because it is bigger. So how do we actually split it?</p>
+
+<p>Well, we can’t actually physically “split” something. What we do, is we can adjust the current block, and create a new block, representing the leftover space of the current block. The reason why we need to specifically create a new block, is to ensure the entire heap is covered in memory blocks. If we do not, then again, there will be a gap, inaccessible as it is not mapped to any existing memory block.</p>
+
+<p>So, in our function, we would calculate the size difference. We would adjust the current memory block, by decreasing its size to the data’s size. Then, we would create a new block, much like how we created a new block in <strong>Case 4</strong>, except the size will instead be the “size difference” we have calculated just then. The new block will be marked available for use, and a new piece of data in the future could utilize that block.</p>
+
+<h4 id="analysis-of-speed-and-efficiency">Analysis of speed and efficiency</h4>
+
+<p>So now that we have covered the algorithm, we could examine its time and space complexity. Let’s start off with time</p>
+
+<p>Obviously, at the very start, the time complexity would be very close to O(1), since there are no memory blocks (or not too much) yet. However, as we go on to use the heap, the complexity will gradually increase, where the worst case scenario would be O(n), where each block has been sub-divided so many times that its size is 1 byte. However, such case is unlikely, as it requires a lot of tiny data being malloc’d onto the heap. In general, the time complexity would be O(n / k), where n represents the heap size, and k represents the average data size. Obviously, k cannot be larger than n, so as k grows larger (a lot of huge data), less memory blocks is needed and less traverse time.</p>
+
+<p>Space complexity is essentially the same. At the start, there will be very little space used to store memory blocks, but as time goes on, the space required to store all the blocks will inevitably grow. Similarly, frequent use of smaller data will cause the memory blocks to be sub-divided further, thus increasing space to store blocks.</p>
+
+<p>The average case? Hard to say, because it really depends on how you are using the heap. The main issue with this algorithm is the space complexity, not necessarily the time complexity. Even a O(n) time complexity would be extremely fast for most use cases. However, a O(n) space complexity would be quite disastrous, as there will literally be more space used to store these blocks, than the actual size of the heap, again defeating the purpose of the algorithm.</p>
+
+<h3 id="the-free-algorithm">The free algorithm</h3>
+
+<p>The free algorithm, in our case, is very straightforward, given the foundation we have built in the malloc algorithm. Given a valid address to the heap, we linear scan all memory blocks, find the block with the corresponding address, then traverse the entire linked list of blocks, and mark each and every block as “free”. That’s it, not special tricks needed.</p>
+
+<h3 id="readwrite-to-heap">Read/write to heap</h3>
+
+<p>What’s the use of the heap if we can’t access it? Of course we need functions that are able to extract the information that is stored on the heap. Luckily, given the foundation built by malloc, reading and writing is very easy.</p>
+
+<p>Similarly to <code class="language-plaintext highlighter-rouge">free</code>, we need to scan through memory blocks until a matching block is found, with the correct address. But instead of marking blocks as “free”, we simply copy the content on the heap, at each block’s address, into a buffer variable and traverse to the next block.</p>
+
+<p>For writing, the reverse is done, where we would copy the stuff <strong>from</strong> the buffer <strong>to</strong> the heap at the given address at the current block.</p>
+
+<p>A possible problem is with the current implementation is that it is reliant on the end-user to supply our R/W functions (read/write) with a valid address. What if they supplied a garbage address, yet it coincidentally matches a memory block? The program have no way to distinguish and will treat it as a “starting block”. Although the fix for this would be quite trivial. Simply add another flag to the block, <code class="language-plaintext highlighter-rouge">isStarting</code>, that marks whether or not the current given block is the starting block.</p>
+
+<h3 id="final-thoughts">Final thoughts</h3>
+
+<p>No doubt modern, robust compilers like GCC will have a way more optimal algorithm for malloc and free, yet the core concept between most modern malloc algorithms stay the same. They all rely on the concept of dividing memory into different blocks. This is precisely the reason why sometimes malloc feels sluggish and slow. Whilst you can comfortably sit there and enjoy memory being magically given to you, malloc has to do the hard work of managing your heap to minimize memory being wasted. As with most algorithms in Computer Science, there will often be a trade-off between time and space. In this case, “space” is your heap and time is the speed of malloc. A naive malloc will no doubt be speedy, but the speed trade-off is huge. Conversely, a “space-optimized” algorithm like this requires time. So, in the end, it is about finding the right <em>balance</em>. As Thanos would say “Perfectly balanced, as all things should be”.</p>
+
+<p><img src="https://www.meme-arsenal.com/memes/de7e96af20765406d4b81d81cffc6268.jpg" alt="Thanos" /></p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Dynamic Memory" /><category term="C" /><category term="Dynamic Memory" /><category term="Malloc" /><category term="Heap" /><summary type="html"><![CDATA[Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under malloc, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory. The project’s source code can be found here.]]></summary></entry><entry><title type="html">Generating Music using Recurrent Neural Networks</title><link href="https://blog.bowenfeng.xyz/projects/ai/2021/09/29/musegen.html" rel="alternate" type="text/html" title="Generating Music using Recurrent Neural Networks" /><published>2021-09-29T00:00:00+00:00</published><updated>2021-09-29T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/ai/2021/09/29/musegen</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/ai/2021/09/29/musegen.html"><![CDATA[<p>Music and speech is similar in many ways. Both are considered “sequence data”,
+meaning both almost always appear in sequences, and each data point is dependent
+on the previous datapoint. Both also contain “sequential patterns”, 
+where there will exists patterns of small sequences of data.</p>
+
+<p>RNNs, or Recurrent Neural Networks, are especially suited to train
+sequential data, such as time-series data (e.g avg rainfall in a
+given year) or texts, as discussed above. By having the capability
+to store “states”, RNNs can effectively “remember” previous 
+inputs, which makes the predicted output meaningful when taken
+as a whole, rather than just a random string of data.</p>
+
+<p>In this project, two models were developed and tested. GRU (gated
+recurrent unit) and Bidirectional LSTM (long short term memory).
+Details of both models are discussed below.</p>
+
+<p>The project source code can be found <a href="https://github.com/thebowenfeng/MuseGen">here</a>.</p>
+
+<p>A video demo of the (now discontinued) interactive website can be found here:</p>
+
+<p><a href="http://www.youtube.com/watch?v=-TX8kUK7zos"><img src="http://img.youtube.com/vi/-TX8kUK7zos/0.jpg" alt="Video" /></a></p>
+
+<h2 id="gru">GRU</h2>
+
+<p>GRU is a really popular variant of RNNs, alongside with LSTM, is
+frequently used for text-based tasks such as semantic analysis or
+text generation. Compared to its counterpart, GRU is newer 
+and is slightly faster to train, which is why I opted for GRU
+as opposed to vanilla LSTM.</p>
+
+<p>The entire music is first serialized into a sequence of integers,
+each integer represents a specific note. The master sequence is then
+divided into smaller subsequence, which simulates a “verse” of 
+music. Smaller sequence length leads to no continuity and erratic/random
+notes being generated, whereas larger subsequence will lead to
+higher repetition of the original music. As such, different music
+will have different optimal subsequence length, requiring some
+trial and error.</p>
+
+<p>Each subsequence is then mapped to its neighboring note, which is inspired
+by a similar technique used in text generation. Essentially, every note is mapped
+to the next note that appears. Intuitively, this allows the neural network
+to recognize inherent patterns between the progression of different notes.
+For example, if there are a lot of arpeggios in a particular piece of music,
+then the sequence mapping will reflect this by having more “pairs”
+that form thirds. Even if we decided to randomly pick a pair out of all
+pairs, then it is likely that we will pick a pair that forms a third.</p>
+
+<p>The problem with this technique, is that unlike textual data, music is often highly
+repetitive. For instance, it is extremely unlikely for a given word/sentence
+to have a high frequency of a certain repeated pattern of characters. However,
+such is not the same case with music. In music, artifacts such as
+trills will result in what I refer to as an “infinite loop of hell” where the 
+network will generate a infinitely long trill because there are a lot of pairs
+of alternating notes, due to there being several trills. The neural network does
+not possess an understanding for music, so therefore it does not know when to 
+stop “trilling”. You can observe this happening, sometimes, when the 
+neural network is trained on Beethoven’s “For Elise”. The famous
+E &amp; D# “trill” at the beginning will cause the infinite loop of hell to happen,
+where the AI will generate a infinitely long E &amp; D# “trill”.</p>
+
+<p>The structure of the network is fairly standard: Embedding layer, GRU layer
+and a Dense output layer. The generated music is not perfect by a long shot,
+but will retain notable features from the music. For instance, when trained on 
+Beehoven’s Moonlight Sonata 1st Movement, the famous G# C# E trio 
+will likely to frequently repeat itself. However, when trained on more
+erratic music such as Listz’s La Campanella, the output will resemble to something
+closer to a keyboard being mashed together.</p>
+
+<h2 id="bidirectional-lstm">Bidirectional LSTM</h2>
+
+<p>Bidirectional LSTM is a newer and more promising variant of a Unidirectional
+(normal) LSTM. In essence, it is a combination of two RNNs. One that goes 
+forward, and one that goes backwards. From a higher level perspective, this
+will allow your network to retain both states from the future and the past at
+any given point, making it understand context better.</p>
+
+<p>For this model, we will utilize a different data processing technique.
+The music is still serialized into a sequence of integers, and split
+into smaller subsequence. However, each subsequence is converted into
+a set of n-grams, which again is inspired by a common technique used to
+process textual data.</p>
+
+<p>For instance, given the sequence of notes A, B, C, D, E. The n-gram
+sequence is:</p>
+<ul>
+  <li>A, B</li>
+  <li>A, B, C</li>
+  <li>A, B, C, D</li>
+  <li>A, B, C, D, E</li>
+</ul>
+
+<p>In this case, the last element in each n-gram will become the “target”
+value.</p>
+
+<p>This will give the neural network opportunity to learn from both a note’s
+immediate neighbor (see GRU model) and also the larger “mother” sequence
+it was apart of. In other words, the neural network should, in theory,
+preserve both continuity of the notes, and avoid duplication of the original
+music, to a certain degree. (see below)</p>
+
+<p>However, this means that there will be more emphasis on continuity when compared
+to the GRU model, as each n-gram set will only have 1/2 “neighboring notes”
+mappings, whereas the rest will be a longer sequence. Although this is unlikely
+to result in strong plagiarism, it is expected that the output
+music will retain more snippets of the original music, and less
+“creativity”.</p>
+
+<p>All n-grams are left-padded and the last notes are stripped to
+be used as target values. The model is similar to the GRU model,
+Embedding and Dense layers are the same, the only difference
+is the GRU layers is replaced with a Bidirectional layer.</p>
+
+<p>As somewhat expected, the output is slightly more structured,
+but more similar to the original music, compared to GRU model. However,
+the difference is not major, and more erratic music (La Campanella) will
+still result in gibberish output.</p>
+
+<h2 id="final-thoughts">Final thoughts</h2>
+
+<p>Although similar, there are still key differences between textual data
+and musical data. Given the simplicity of both the training data, and
+the model, the output was surprisingly good. It is fairly obvious
+that neither model truly grasped the technicalities of music.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="AI" /><category term="Python" /><category term="AI" /><category term="Music" /><category term="RNN" /><summary type="html"><![CDATA[Music and speech is similar in many ways. Both are considered “sequence data”, meaning both almost always appear in sequences, and each data point is dependent on the previous datapoint. Both also contain “sequential patterns”, where there will exists patterns of small sequences of data.]]></summary></entry><entry><title type="html">Performing a mid-function trampoline hook using C++</title><link href="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html" rel="alternate" type="text/html" title="Performing a mid-function trampoline hook using C++" /><published>2020-05-13T00:00:00+00:00</published><updated>2020-05-13T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html"><![CDATA[<p>Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be <strong>performed on the first byte</strong> of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.</p>
+
+<p><a href="https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265">Full code gist is here</a></p>
+
+<h3 id="what-exactly-is-trampoline-hooking">What exactly is trampoline hooking?</h3>
+<p>As you may already know, a normal detour is simply some clever code that will force the program to redirect its flow of execution, hence <strong>detouring</strong>. Here is a rough diagram of how it is done:
+<img src="https://i.imgur.com/9HLPLsx.png" alt="detour" />
+By changing a few bytes of the original program’s code, we can place a jump that jumps to our function, executes our code, then jumps back. This method is straightforward, and very hard to detect. However, it has a few drawbacks:</p>
+<ul>
+  <li>Function can only be written as in-line ASM, cannot have prologues/epilogues and must not distrub the stack in any form or way.</li>
+  <li>Most compilers do not support x64 inline-ASM (such as MSVC). The ones that do support (clang) it does not support the “naked” attribute (which removes prologues/epilogues), meaning you have to manually remove the prologue, at the very least.</li>
+</ul>
+
+<p>It is for these reasons that many people nowadays often opt in for a newer technique, called <strong>trampoline hooking</strong>. Trampoline hooking will roughly look like this:
+<img src="https://i.imgur.com/vquFLQd.png" alt="Tramp hook" />
+Similar to a standard detour, the code execution flow is redirected via a jump. However, as opposed to a few lines of assembly code, the “hook function” can be a full-fledged function that is able to perform any computation. At the end, it will redirect to a gateway, which will restore the stack by executing the stolen bytes, and jump back to the original function.</p>
+
+<p>The benefits of a trampoline hook, of course, no need to write assembly (yuck), and overall greater possibility as you do not have to worry about keeping the stack intact; the compiler will automatically clean up the stack for you after executing your hook function. However, the downside is:</p>
+<ul>
+  <li>You can only place your hook <strong>on the first byte</strong> of the target function, as the stack has to be <em>pristine</em> in order for this to work.</li>
+</ul>
+
+<p>Well, what if I told you we actually don’t have to necessarily perform it on the first byte, with some clever tricks? 
+But first, let’s discuss the motivation behind this
+<img src="https://external-preview.redd.it/BiDC1ZxXOw4lP0nwG8WBEJcJ-paiZeF3qq2msUqTftU.jpg?auto=webp&amp;s=95758fef805cfeb23ee971f1174c666284795dc2" alt="shocked" /></p>
+<h3 id="why-is-mid-function-hooking-so-important">Why is mid-function hooking so important</h3>
+<p>You see, sometimes developers don’t necessarily want people messing around with their program. DRMs and AntiCheats are some of the more common measures to prevent people from “hacking” certain programs. Although in most cases their concerns are valid, in rare cases, there might be a legitimate case for someone to “illegally” modify a program. Anyhow, this article isn’t an ethics debate, so continuing on…</p>
+
+<p>One of the most common techniques anti-cheats (or similar programs) use is checking the first byte of functions. Anti-cheat developers also realize how lucrative function hooking is, and because most people have to resort to trampoline hooking, they realized that checking the integrity of the first byte is a very efficient and effective solution. It is not computationally demanding (at least compared to checking every byte), and it directly stops most people from performing trampoline hooks.</p>
+
+<p>So, if one manages to find a way to place their trampoline hook, even just a few bytes down, it would completely circumvent their entire detection vector, at least in theory. There are far more effective ways to prevent WPM (write process memory), but not every anti-cheat is equipped with them, so such knowledge is still relevant.</p>
+
+<h3 id="so-how-do-we-do-it">So how do we do it?</h3>
+<p>Stack integrity is everything when it comes to hooking. If you modify the stack without the program’s knowledge, it can lead to catastrophic failures. It is precisely the reason why trampoline hooks cannot be performed lower down in the function, as our “hook” function expects a clean stack. So, as long as we can figure out a way to “clean” the stack, so to speak, we can theoretically perform our trampoline hook anywhere. In practice, there are certain soft limitations, which will become apparent later. So, let’s get started!</p>
+
+<h3 id="the-victim-program">The victim program</h3>
+<p>I have developed a very simple testing program for the purpose of this article. However, in practice, the workflow should be extremely similar. Here is what is looks like:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#include</span> <span class="cpf">&lt;iostream&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;Windows.h&gt;</span><span class="cp">
+</span>
+<span class="kt">int</span> <span class="nf">toHook</span><span class="p">(</span><span class="kt">int</span> <span class="n">myInteger</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">myInteger</span> <span class="o">=</span> <span class="n">myInteger</span> <span class="o">+</span> <span class="mi">5</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">myInteger</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">while</span> <span class="p">(</span><span class="nb">true</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">GetKeyState</span><span class="p">(</span><span class="n">VK_SPACE</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x8000</span><span class="p">)</span>
+        <span class="p">{</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">toHook</span><span class="p">(</span><span class="n">value</span><span class="p">);</span>
+            <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="n">value</span><span class="p">;</span>
+            <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+            <span class="n">Sleep</span><span class="p">(</span><span class="mi">100</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>The goal, by the end, is to hook the “toHook” function (duh) and hopefully also modify its parameter value. Right now it is incrementing the parameter by 5, let’s see if we can change that to 100.</p>
+
+<h3 id="reversing-the-function">Reversing the function</h3>
+<p>Firing up a debugger, we can easily see the function’s assembly code:
+<img src="https://i.imgur.com/XKtnEYu.png" alt="asm code" />
+It looks like a very standard cdecl prologue (because it is). Normally you just have to count 5 bytes and nop all associated instructions, but since we wanted to place our hook lower down, we ultimately need to find a way to maintain a clean stack.</p>
+
+<p>Now you might say “Hold on a second, can’t we just pop the ebp and then place our hook after”? And you would be 100% correct. Like I said, as long as you maintain a clean stack, it doesn’t matter where you put your hook. Obviously, maintaining a clean stack gets exponentially more difficult, the lower you go. However, in this case, you can see we could quite easily clean the stack all the way up to <code class="language-plaintext highlighter-rouge">push edi</code>, as most of these instructions are push, meaning reversing them is as easy as just having a corresponding pop. But, in our case, for this PoC, we will simply just place our function after the <code class="language-plaintext highlighter-rouge">mov</code> instruction.</p>
+
+<p>Here is what the flow should look like</p>
+<ol>
+  <li>Replace <code class="language-plaintext highlighter-rouge">sub esp, 000000C0</code> with <code class="language-plaintext highlighter-rouge">pop ebp</code> and a <code class="language-plaintext highlighter-rouge">jmp</code> instruction, jumping to your hook function. Make sure you <strong>do not</strong> overwrite the <code class="language-plaintext highlighter-rouge">mov</code> instruction as that is still required to maintain stack integrity.</li>
+  <li>Execute our hook function, do whatever we want, and eventually jump to our gateway</li>
+  <li>In our gateway, execute all the bytes from the beginning of our function, in order to restore the stack. Typically, we would only need to execute the “stolen bytes” (bytes overwritten for our <code class="language-plaintext highlighter-rouge">jmp</code>), but in this case, all bytes needs to be overwritten, as we purposely cleaned the stack.</li>
+  <li>Jump back after our <code class="language-plaintext highlighter-rouge">jmp</code> instruction, just as normal.</li>
+</ol>
+
+<p>Voila, you just performed a trampoline hook mid-function.</p>
+
+<h3 id="the-technical-implementation">The technical implementation</h3>
+
+<p>The PoC code could be found <a href="https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265">here</a>. However, I would encourage attempting to implement this yourself.</p>
+
+<p><em>The above DLL code is written to be injected into a 32-bit (x86) process. This may or may not work on a 64 bit process, due to 64 bit addresses taking up 8 bytes as opposed to 4, which means the relative jump will only work for addresses within the 4GB range.</em></p>
+
+<p>We’ll start with some fairly standard template code for a DLL, which defining an entry point, and creating a Thread for our code:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">BOOL</span> <span class="n">APIENTRY</span> <span class="nf">DllMain</span><span class="p">(</span> <span class="n">HMODULE</span> <span class="n">hModule</span><span class="p">,</span>
+                       <span class="n">DWORD</span>  <span class="n">ul_reason_for_call</span><span class="p">,</span>
+                       <span class="n">LPVOID</span> <span class="n">lpReserved</span>
+                     <span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">switch</span> <span class="p">(</span><span class="n">ul_reason_for_call</span><span class="p">)</span>
+    <span class="p">{</span>
+    <span class="k">case</span> <span class="n">DLL_PROCESS_ATTACH</span><span class="p">:</span>
+        <span class="n">CreateThread</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">MainThread</span><span class="p">,</span> <span class="n">hModule</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+        <span class="k">break</span><span class="p">;</span>
+    <span class="k">case</span> <span class="n">DLL_THREAD_ATTACH</span><span class="p">:</span>
+    <span class="k">case</span> <span class="n">DLL_THREAD_DETACH</span><span class="p">:</span>
+    <span class="k">case</span> <span class="n">DLL_PROCESS_DETACH</span><span class="p">:</span>
+        <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">TRUE</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>Next, we need to create a function that is able to allocate a code cave and write our stolen bytes. The function is as follows:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">BYTE</span><span class="o">*</span> <span class="nf">trampoline</span><span class="p">(</span><span class="n">BYTE</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">BYTE</span><span class="o">*</span> <span class="n">dest</span><span class="p">,</span> <span class="kt">int</span> <span class="n">len</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">len</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">)</span> <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="n">BYTE</span><span class="o">*</span> <span class="n">gateway</span> <span class="o">=</span> <span class="p">(</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">VirtualAlloc</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">len</span> <span class="o">+</span> <span class="mi">5</span><span class="p">,</span> <span class="n">MEM_COMMIT</span> <span class="o">|</span> <span class="n">MEM_RESERVE</span><span class="p">,</span> <span class="n">PAGE_EXECUTE_READWRITE</span><span class="p">);</span>
+
+    <span class="n">memcpy_s</span><span class="p">(</span><span class="n">gateway</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">relativeAddr</span> <span class="o">=</span> <span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-</span> <span class="n">gateway</span> <span class="o">-</span> <span class="mi">5</span><span class="p">;</span>
+
+    <span class="o">*</span><span class="p">(</span><span class="n">gateway</span> <span class="o">+</span> <span class="n">len</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0xE9</span><span class="p">;</span>
+    <span class="o">*</span><span class="p">(</span><span class="kt">uintptr_t</span><span class="o">*</span><span class="p">)((</span><span class="kt">uintptr_t</span><span class="p">)</span><span class="n">gateway</span> <span class="o">+</span> <span class="n">len</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">=</span> <span class="n">relativeAddr</span><span class="p">;</span>
+
+    <span class="n">detour</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="n">gateway</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>There are a couple things worthy of attention. First, your “length” cannot be less than 5, as that is the size of the <code class="language-plaintext highlighter-rouge">jmp</code> instructions + a 4 byte address. <code class="language-plaintext highlighter-rouge">VirtualAlloc</code> is more or less a <code class="language-plaintext highlighter-rouge">malloc</code> in C, except that it offers more control, as it is a winAPI function. We require read &amp; write permission, hence <code class="language-plaintext highlighter-rouge">PAGE_EXECUTE_READWRITE</code>. The rest of the code is simply a matter of copying the “stolen bytes” (which is the bytes from the start of the function till the last instruction we overwritten), and then placing a jmp at the end, to jump back to the original function.</p>
+
+<p>Now you may wonder what the “detour” function is doing. This is a left-over piece of code I had written for a standard function detour. It essentially just writes a <code class="language-plaintext highlighter-rouge">jmp</code> instruction and calculates the relative address to the destination. <code class="language-plaintext highlighter-rouge">detour</code> is what will modify the original function and forces it to redirect to our “hook” function. So here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">bool</span> <span class="nf">detour</span><span class="p">(</span><span class="n">BYTE</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">BYTE</span><span class="o">*</span> <span class="n">dst</span><span class="p">,</span> <span class="kt">int</span> <span class="n">len</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">len</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">)</span> <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+
+    <span class="n">DWORD</span> <span class="n">currProtect</span><span class="p">;</span>
+    <span class="n">VirtualProtect</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">PAGE_EXECUTE_READWRITE</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">currProtect</span><span class="p">);</span>
+     
+    <span class="o">*</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0x5D</span><span class="p">;</span> <span class="c1">// pop ebp</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">relativeAddr</span> <span class="o">=</span> <span class="n">dst</span> <span class="o">-</span> <span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span> <span class="o">-</span> <span class="mi">5</span><span class="p">;</span> <span class="c1">// Relative jump offsetted by 4</span>
+    <span class="o">*</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0xE9</span><span class="p">;</span> <span class="c1">// Start jump 4 bytes in</span>
+
+    <span class="o">*</span><span class="p">(</span><span class="kt">uintptr_t</span><span class="o">*</span><span class="p">)(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">5</span><span class="p">)</span> <span class="o">=</span> <span class="n">relativeAddr</span><span class="p">;</span>
+
+    <span class="n">VirtualProtect</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">currProtect</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">currProtect</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>You may see some similarities between certain code in this function, and in the trampoline function. Most of it is fairly straightforward, <code class="language-plaintext highlighter-rouge">VirtualProtect</code> allows us to write to places in memory where we normally cannot write to. In order to restore the stack, we need to <code class="language-plaintext highlighter-rouge">pop ebp</code>, so we simply overwrite the 4th byte with <code class="language-plaintext highlighter-rouge">0x5D</code> (instruction for pop ebp). Then, at the 5th byte, we start writing our <code class="language-plaintext highlighter-rouge">jmp</code> instruction. The relative address will be 5 bytes after the <code class="language-plaintext highlighter-rouge">jmp</code> instruction, which together with the 4 byte offset, will become 9 bytes.</p>
+
+<p>Finally, we need to write our hook function, which is actually the easiest part. Here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">typedef</span> <span class="nf">int</span><span class="p">(</span><span class="kr">__cdecl</span><span class="o">*</span> <span class="n">toHook_t</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span> <span class="n">a1</span><span class="p">);</span>
+<span class="n">toHook_t</span> <span class="n">origFunc</span><span class="p">;</span>
+
+<span class="kt">int</span> <span class="kr">__cdecl</span> <span class="nf">hookFunc</span><span class="p">(</span><span class="kt">int</span> <span class="n">a1</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"Current value: "</span> <span class="o">&lt;&lt;</span> <span class="n">a1</span><span class="p">;</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">origFunc</span><span class="p">(</span><span class="n">a1</span> <span class="o">+</span> <span class="mi">100</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>We’ll define a function pointer, to the original hook function. The calling convention (in this case <code class="language-plaintext highlighter-rouge">__cdecl</code> ) is very important as it has to be consistent. Different calling conventions have different methods of cleaning the stack. Some requires the caller to clean, whilst others requires the callee. In any case, you would most likely need to perform some static analysis using IDA Pro or similar, in order to confirm a function’s calling convention. The reason why we are “returning” in our hook function, is to allow the compiler to generate code <strong>as if</strong> we were calling the function, which means once we restore the stack, the original program will have no clue anything even happened. This is the beauty of trampoline hooking. We have the complete freedom to intercept and pass in bogus values, and the program will not have any clue.</p>
+
+<p>The final step is to execute above said functions, in a main thread. Here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">DWORD</span> <span class="n">WINAPI</span> <span class="nf">MainThread</span><span class="p">(</span><span class="n">LPVOID</span> <span class="n">param</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">AllocConsole</span><span class="p">();</span>
+    <span class="kt">FILE</span><span class="o">*</span> <span class="n">f</span><span class="p">;</span>
+    <span class="n">freopen_s</span><span class="p">(</span><span class="o">&amp;</span><span class="n">f</span><span class="p">,</span> <span class="s">"CONOUT$"</span><span class="p">,</span> <span class="s">"w"</span><span class="p">,</span> <span class="n">stdout</span><span class="p">);</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">baseAddr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">uintptr_t</span><span class="p">)</span><span class="n">GetModuleHandle</span><span class="p">(</span><span class="s">L"midFuncHookVictim.exe"</span><span class="p">);</span>
+
+    <span class="n">origFunc</span> <span class="o">=</span> <span class="p">(</span><span class="n">toHook_t</span><span class="p">)(</span><span class="n">baseAddr</span> <span class="o">+</span> <span class="mh">0x12500</span><span class="p">);</span>
+    <span class="n">origFunc</span> <span class="o">=</span> <span class="p">(</span><span class="n">toHook_t</span><span class="p">)</span><span class="n">trampoline</span><span class="p">((</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">origFunc</span><span class="p">,</span> <span class="p">(</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">hookFunc</span><span class="p">,</span> <span class="mi">9</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>It is worth noting that we changed the address of the origFunc from its address in memory, to our gateway (as that is the return value of the trampoline). We need to ensure our hook function redirects to our gateway in order to prevent “hook recursion”. In other words, if we do not specify our gateway address, the hookFunc will simply jump back to the start of the function, and we will have an infinite loop.</p>
+
+<h3 id="closing-thoughts">Closing thoughts</h3>
+<p>The relative ease, with just a little bit more code and attention to reversing, makes this technique a very powerful technique when it comes to dealing with “anti-cheats”. Of course, as I have covered above, there are many other ways to prevent WPM aside from byte-checking, and of which are much more powerful and much harder to bypass. However, this is not to say that every single anti-tampering service is willing and able to implement more advanced checks. Byte checking is still a very prevalent techniques used by such programs, simply due to its ease of implementation, and relative efficiency. In any case, regardless of its usefulness, knowing an extra technique will not hurt anyone (maybe except the program you are attempting to modify).</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Reverse Engineering" /><category term="C++" /><category term="Reverse Engineering" /><category term="Hacking" /><summary type="html"><![CDATA[Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be performed on the first byte of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.]]></summary></entry><entry><title type="html">Using Markov Chains to simulate human speech</title><link href="https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html" rel="alternate" type="text/html" title="Using Markov Chains to simulate human speech" /><published>2020-01-17T00:00:00+00:00</published><updated>2020-01-17T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html"><![CDATA[<p>Nowadays there are many sophisticated ways to approach NLP, most of them involves
+neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP
+and can be used in a variety of fields.</p>
+
+<p>However, can something as simple as Markov Chains compete with sophisticated techniques
+like RNNs, or even better, GPT-2? <em>Hint: It can’t but I thought it was interesting</em></p>
+
+<p>Skip to the bottom for the technical implementation. <a href="https://github.com/thebowenfeng/markov_chatbot-new-">Github project link here</a></p>
+
+<h2 id="what-are-markov-chains">What are markov chains?</h2>
+
+<p>In mathematical terms, a <strong>Markov Chain</strong> is defined as</p>
+<blockquote>
+  <p>A directed graph with weighted edges connecting states with each other.</p>
+</blockquote>
+
+<p><em>Definition may vary</em></p>
+
+<p>In English, a Markov Chain is essentially an algorithm that selects the next most
+possible event, based on previous events, using probabilities. Similar to a RNN
+(Recurrent Neural Networks), it is able to predict the next <em>state</em> based on
+information on previous states. However, unlike a Recurrent Neural Network, 
+its algorithm is much more simplistic, and relies on pure probability.</p>
+
+<p>What this means is that, if event A -&gt; event B frequently leads to event C, then
+event C will more likely to be chosen as the next “predicted state”</p>
+
+<h2 id="how-does-markov-chains-work-in-a-chatbot">How does Markov Chains work in a chatbot</h2>
+
+<p>Knowing how Markov Chains work, we could swap <em>states</em> to <em>words</em> in a sentence.
+In other words, the next “state” being predicted will simply be the next word in 
+a given sentence.</p>
+
+<p>This might sound like a brilliant idea. After all, words that appear together frequently
+are more likely to make sense. For instance, given the words “I” and “am”, the algorithm
+is likely to predict the word “fine”, as “I am fine” frequently appears together.</p>
+
+<p>Therefore, Markov Chains should generate perfect human sentences (or at least near perfect),
+right?</p>
+
+<p><img src="https://c.tenor.com/uYn6YAkOoi0AAAAM/duck-no.gif" alt="Duck saying NO" /></p>
+
+<h2 id="problems-with-markov-chains-and-nlp">Problems with Markov Chains and NLP</h2>
+
+<p>Its really easy to miss, and obviously my observations are with the benefit of hindsight, but
+if we rely on pure probabilities, then sentences will not make logical sense, despite
+possessing “flow”.</p>
+
+<p>You see, just because a sentence flows along nicely, does not necessarily mean it makes
+logical sense, or contains any meaning. Let’s take the following sentence:</p>
+<ul>
+  <li>“I am really good with guns should be banned”</li>
+</ul>
+
+<p>Now you may think “what a weird sentence”, and you’d be absolutely right in your observation.
+This sentence, by most definitions, makes <strong>zero</strong> sense. In fact, it looks like
+two sentences clumped together, namely “I am really good with guns” and “guns should be banned”.</p>
+
+<p>So, despite the fact that each word in the sentence “connects” to the next word,
+the sentence as a whole fails to give any meaning. This is the problem with Markov Chains.</p>
+
+<p>Now, as a reminder, Markov Chains work by taking in several previous words, and attempt
+to predict the next words. This leads to several problems:</p>
+
+<h4 id="corpus">Corpus</h4>
+
+<p>As with most “Machine Learning” algorithms, this algorithm is trained on a large blob
+of text. The problem with text is that it will typically vary in meaning, even if it came from a singular
+source. Because of the way Markov Chains work, the text will have to be broken into
+small tokens (discussed later), which maps a set of words with the next word in the sequence
+(For instance, I am good thanks might become “I am good”, “am good thanks”).</p>
+
+<p>This means that <em>tokens</em> from a variety of different sentences will be mixed together. 
+As Markov Chains are based on probabilities, it does not care if a token exists within
+the same context as a previous used token. So, obviously this can lead the problems like
+the above sentence, where individual “tokens” might make sense, but because
+said tokens exists in different context, the resulting sentence makes no sense.</p>
+
+<h4 id="scope">Scope</h4>
+
+<p>Scope, in this case, refers to <em>How much stuff is the algorithm taking into account,
+when predicting the next word?</em>, and the answer is <em>not much actually</em>.</p>
+
+<p>You see, when predicting the next word, the algorithm only cares for the previous
+few words. After predicting, it completely forgets and starts anew. This is akin to someone
+with Alzheimer’s so severe that they will forget what they are talking about mid-sentence.
+In fact, our case is even worse, as the algorithm will forget every 3/4 words.</p>
+
+<p>So if we were to entirely ignore the previous problem, and assume every single text
+came from the exact same context, I highly doubt the sentence will still make logical
+sense, as the algorithm will possess no knowledge of what they’ve generated, 2 seconds ago.</p>
+
+<p>So now that we’ve discussed the Pros and Cons of Markov Chains, let’s see how we can
+implement it in code.</p>
+
+<h2 id="technical-implementation">Technical implementation</h2>
+
+<p>The implementation is actually quite simple. We will break down the text into
+tri-grams, which is essentially every sequential group of “3” (hence tri) words in a sentence.
+That might not make too much sense, so here is an example:</p>
+
+<p>Suppose we have this sentence: “Hello there, how are you?”</p>
+
+<p>The sentence will be broken down into the following:</p>
+
+<ul>
+  <li>Hello there, how</li>
+  <li>there, how are</li>
+  <li>how are you?</li>
+</ul>
+
+<p><em>The punctuations are there purely for ease of understanding, and will be removed
+in the actual dataset</em></p>
+
+<p>The last word in each tri-gram will be the “predicted state”. The algorithm will take in
+two words, search for a trigram whose first two words match, and will output the 
+third word in the tri-gram as its prediction.</p>
+
+<p>So how does the whole probability thing plays in?</p>
+
+<p>You see, when two tri-grams have the same first two words, but perhaps different
+(or even same) last word, the algorithm will not intuitively know which one to choose.
+To it, every single option makes sense, as that’s what people really say.
+So, instead, we will collate all “matched” tri-grams, and randomly
+select one to be the predicted word. This way, the more identical tri-grams
+you have, the higher the chance that particular tri-gram will be picked.</p>
+
+<p>That’s it, that’s all there is to it. 
+<a href="https://github.com/thebowenfeng/markov_chatbot-new-">Here is my implementation</a>
+, along with some scraping code to obtain the corpus.</p>
+
+<h2 id="final-thoughts">Final thoughts</h2>
+
+<p>Whilst it is an interesting experiment, pure probabilities obviously do not
+cut it when dealing with something as complex and nuanced as human languages. 
+However, it is important to recognize that some concepts used in Markov Chains,
+such as previous states, is also used in more modern approaches, such as RNNs.</p>
+
+<p>Of course, it is possible to make some improvements upon this bare-metal model. 
+For instance, you could restrict the algorithm to select only tri-grams belonging 
+in the same “context” (which will require some manual labelling), in order
+to improve its “make-sense-ness”. However, even with such improvements,
+or whichever improvement you might’ve thought of, it is unlikely there will
+be any fruitful results from such a rudimentary algorithm.</p>
+
+<p>So, for now, Markov Chains chatbot will remain, a fun experiment.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="NLP" /><category term="Python" /><category term="Markov Chains" /><category term="Chatbot" /><category term="NLP" /><summary type="html"><![CDATA[Nowadays there are many sophisticated ways to approach NLP, most of them involves neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP and can be used in a variety of fields.]]></summary></entry><entry><title type="html">Using web drivers to automate typing races in Python</title><link href="https://blog.bowenfeng.xyz/projects/web%20automation/2019/09/18/typeracer-hack.html" rel="alternate" type="text/html" title="Using web drivers to automate typing races in Python" /><published>2019-09-18T00:00:00+00:00</published><updated>2019-09-18T00:00:00+00:00</updated><id>https://blog.bowenfeng.xyz/projects/web%20automation/2019/09/18/typeracer-hack</id><content type="html" xml:base="https://blog.bowenfeng.xyz/projects/web%20automation/2019/09/18/typeracer-hack.html"><![CDATA[<p>The power of web automation is apparent, whether it is automating a tedious task, or performing automated testing on a website. However, with great power comes great responsibility. Web automation tools can be easily abused, spam being the main issue. Today we will examine the use of web automation in a slightly less nefarious manner, automating <a href="https://play.typeracer.com/">TypeRacer</a> using Python, Chrome WebDriver and Selenium.
+<a href="https://github.com/thebowenfeng/typeracer-hack">Full source code here</a></p>
+
+<h3 id="what-is-typeracer-and-how-does-it-work">What is typeracer and how does it work</h3>
+<p>Typeracer is a famous typing competition-styled game. Each person controls a virtual car, and the faster you can type-out a random paragraph of text, the faster you car moves. Mis-typed words/characters are not counted and you need to delete them before continuing.</p>
+
+<p>The idea is to use Selenium to extract the text, and automatically type out the words for us. <strong>I do not condone cheating and this was done purely as an experiment</strong>. But before we can do that, there are a few things we need to resolve…</p>
+
+<h3 id="typeracers-anti-cheating-mechanisms">Typeracer’s anti cheating mechanisms</h3>
+<p>Before you think you can type 1000 words per minute and be on the number 1 stop on the leaderboards:
+<img src="https://i.kym-cdn.com/entries/icons/facebook/000/027/242/vault.jpg" alt="Stop" />
+Typeracer is not new to people using unfair means to gain an advantage. For starters, they have a CAPTCHA system where you are required to type out an image-based text if your WPM (words per minute) exceeds a certain threshold, or if your WPM has drastically improved suddenly. <em>We will not be discussing how to bypass this CAPTCHA in this article.</em> In any case, there are certain limits you can push in terms of your typing speed, before you are inevitably presented with this CAPTCHA test.</p>
+
+<p>In addition, typeracer also has its own backend algorithm to flag suspicious users. For instance, if someone’s typing speed is consistent and their accuracy is 100%, then it would be highly suspicious as no human is able to maintain 100% consistent typing speed. We will address this later, in the implementation section.</p>
+
+<p>Finally, the ultimate “anti-cheat” is in fact the webdrivers themselves. You see, Google and other companies realized the potential for webdriver abuse, so they have implemented certain mechanisms to identify itself to the website, and any website can easily use this and ban webdrivers from accessing their site. There are, as with anything, ways to bypass such detections by modifying the source code. However, again, this will not be part of the scope of this article.</p>
+
+<h3 id="how-is-this-made">How is this made</h3>
+<p>Simulating user input is quite trivial in Selenium. All you need is to find the HTML element for the “textbox” that receives user input, and use a function “send_keys” to simulate a user typing. However, there is a slight wait before each race, in order to have enough people in a single race. To bypass this issue, we simply repeatedly search for the “countdown popup” until it is gone, which signifies the start of the race.</p>
+
+<p>The most interesting part of this project, is the algorithm to circumvent “soft” cheating detections, as I have mentioned above. Namely</p>
+
+<ul>
+  <li>Perfect consistent typing speed across a single/multiple games</li>
+  <li>Perfect accuracy.</li>
+</ul>
+
+<p>If we are able to implement something that can remove these two conditions, we have effectively “humanized” our bot, at least in the eyes of the Typeracer anti-cheating algorithm. So, what’s the solutions?</p>
+
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Two_red_dice_01.svg/1200px-Two_red_dice_01.svg.png" alt="Random" />
+Yup, you guessed it, random number generator!</p>
+
+<p>Well, to be more technical, we will randomize the typing speed across the entire game, and have randomized “typing mistake” events throughout the game.</p>
+
+<p>First, let’s discuss randomized typing speeds. Since we are essentially looping through the target text, and computers have become fast enough that each iteration in a while or for loop has almost zero delay, we can assume no “natural” delay between each character to the next. This will obviously lead to an inhuman typing speed. So, to combat this, we need to implement some form of artificial delay, which is time.sleep() in Python. For those who aren’t familiar, time.sleep() will pause the current thread of execution for a specified amount of time. Now, as discussed previously, we would need to randomize this delay, in order to achieve a certain level of unpredictability. So, we simply need to use the “random” library in Python to generate random numbers at each pass, and use that number as part of our delay, thereby yielding non-constant typing speeds.</p>
+
+<p>Implementing a typing error is slightly more difficult. We would need to make a deliberate typing error, delete the erroneous text, and re-type the correct text in order to progress. Of course, the probability of causing this event needs to be randomized (again, using random library). But, we also need to randomized the “error length”, or in other words, how many characters do we type before we realize our mistakes and begin backtracking? Now you may say 5, or 10, or 15, but as we have discussed again and again, humans are unpredictable and as such, we need to make our bot as unpredictable as possible. Therefore, the most optimal way is to randomize the “error length”. So in one mistake, we could type 3 characters before backtracking, in the next one, perhaps 10. The next problem is, well what do we type for our erroneous output? Some might opt for some constant, such as typing 3 “a”s or 5 “b”s. Some might say “how about we type random gibberish”? Although that is a valid point, we also need to factor in the human factor. You see, typically when people mistype, they would mistype one character and continue on typing the rest, correctly, but off-setted by one (or how ever many they typed wrong). So, my algorithm will simply skip 1 character, start from the next character, and continue typing, which is a totally reasonable human error. Then, after a random amount of character being typed, our bot will “realize” and starts using backspace to delete the wrong characters, and continue typing correctly.</p>
+
+<h3 id="conclusion">Conclusion</h3>
+<p>By no means is this a perfect typing bot. You will most likely be banned if you use this in an actual race, and I have no desire to spend time to patch the webdriver, just to cheat in a typing game. However, it is an interesting journey to see just how useful web automation can be, even in the most unlikeliest of places.</p>]]></content><author><name>Bowen Feng</name></author><category term="Projects" /><category term="Web Automation" /><category term="Python" /><category term="Selenium" /><category term="Webdrivers" /><category term="Web Automation" /><summary type="html"><![CDATA[The power of web automation is apparent, whether it is automating a tedious task, or performing automated testing on a website. However, with great power comes great responsibility. Web automation tools can be easily abused, spam being the main issue. Today we will examine the use of web automation in a slightly less nefarious manner, automating TypeRacer using Python, Chrome WebDriver and Selenium. Full source code here]]></summary></entry></feed>

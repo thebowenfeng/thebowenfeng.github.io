@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="google-translate-customization" content="108d9124921d80c3-80e20d618ff053c8-g4f02ec6f3dba68b7-c">
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Writing a custom malloc and free implementation using C | Bowen’s Blog</title>
+<meta name="generator" content="Jekyll v4.3.3">
+<meta property="og:title" content="Writing a custom malloc and free implementation using C">
+<meta name="author" content="Bowen Feng">
+<meta property="og:locale" content="en_US">
+<meta name="description" content="Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under malloc, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory. The project’s source code can be found here.">
+<meta property="og:description" content="Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under malloc, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory. The project’s source code can be found here.">
+<link rel="canonical" href="https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html">
+<meta property="og:url" content="https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html">
+<meta property="og:site_name" content="Bowen’s Blog">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2021-10-15T00:00:00+00:00">
+<meta name="twitter:card" content="summary">
+<meta property="twitter:title" content="Writing a custom malloc and free implementation using C">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Bowen Feng"},"dateModified":"2021-10-15T00:00:00+00:00","datePublished":"2021-10-15T00:00:00+00:00","description":"Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under malloc, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory. The project’s source code can be found here.","headline":"Writing a custom malloc and free implementation using C","mainEntityOfPage":{"@type":"WebPage","@id":"https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html"},"url":"https://blog.bowenfeng.xyz/projects/dynamic%20memory/2021/10/15/custom-malloc.html"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="shortcut icon" href="">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-noto-sans@0.0.72/index.min.css">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <script src="/assets/js/main.js"></script><link type="application/atom+xml" rel="alternate" href="https://blog.bowenfeng.xyz/feed.xml" title="Bowen's Blog">
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/default.min.css">
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js"></script>
+<!-- and it's easy to individually load additional languages -->
+<script charset="UTF-8" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/languages/go.min.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+// Init highlight js
+document.addEventListener('DOMContentLoaded', function(event) {
+  var els = document.querySelectorAll('pre code')
+
+  function addLangData(block) {
+    var outer = block.parentElement.parentElement.parentElement;
+    var lang = block.getAttribute('data-lang');
+    for (var i = 0; i < outer.classList.length; i++) {
+      var cls = outer.classList[i];
+      if (cls.startsWith('language-')) {
+        lang = cls;
+        break;
+      }
+    }
+    if (!lang) {
+      cls = block.getAttribute('class');
+      lang = cls ? cls.replace('hljs ', '') : '';
+    }
+    if (lang.startsWith('language-')) {
+      lang = lang.substr(9);
+    }
+    block.setAttribute('class', 'hljs ' + lang);
+    block.parentNode.setAttribute('data-lang', lang);
+  }
+
+  function addBadge(block) {
+    var enabled = ('true' || 'true').toLowerCase();
+    if (enabled == 'true') {
+      var pre = block.parentElement;
+      pre.classList.add('badge');
+    }
+  }
+
+  function handle(block) {
+    addLangData(block);
+    addBadge(block)
+    hljs.highlightBlock(block);
+  }
+
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    handle(el);
+  }
+});
+</script>
+
+<style>
+  /* code language badge */
+  pre.badge::before {
+    content: attr(data-lang);
+    color: #fff;
+    background-color: #ff4e00;
+    padding: 0 .5em;
+    border-radius: 0 2px;
+    text-transform: uppercase;
+    text-align: center;
+    min-width: 32px;
+    display: inline-block;
+    position: absolute;
+    right: 0;
+  }
+
+  /* fix wrong badge display for firefox browser */
+  code > table pre::before {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<header class="site-header " role="banner">
+
+  <div class="wrapper">
+    <div class="site-header-inner">
+<span class="site-brand"><a class="site-brand-inner" rel="author" href="/">
+  <img class="site-favicon" title="Bowen's Blog" src="" onerror="this.style.display='none'">
+  Bowen's Blog
+</a>
+</span><nav class="site-nav">
+          <input type="checkbox" id="nav-trigger" class="nav-trigger">
+          <label for="nav-trigger">
+            <span class="menu-icon">
+              <svg viewbox="0 0 18 15" width="18px" height="15px">
+                <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"></path>
+              </svg>
+            </span>
+          </label>
+
+          <div class="trigger">
+<a class="page-link" href="/about.html">ABOUT</a><a class="page-link" href="/archives.html">ARCHIVES</a><a class="page-link" href="/categories.html">CATEGORIES</a><a class="page-link" href="/">HOME</a><a class="page-link" href="/tags.html">TAGS</a>
+
+
+
+
+
+
+
+
+
+<span class="page-link">
+
+
+
+<div id="google_translate_element" style="display: none;">
+</div>
+
+<span class="ct-language">
+  <ul class="list-unstyled ct-language-dropdown">
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="en">
+          
+          <img src="https://cdn.countryflags.com/thumbs/united-states-of-america/flag-400.png" title="English">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="fr">
+          
+          <img src="https://cdn.countryflags.com/thumbs/france/flag-400.png" title="French">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="zh-CN">
+          
+          <img src="https://cdn.countryflags.com/thumbs/china/flag-400.png" title="Chinese(Simple)">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ja">
+          
+          <img src="https://cdn.countryflags.com/thumbs/japan/flag-400.png" title="Japanese">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ko">
+          
+          <img src="https://cdn.countryflags.com/thumbs/south-korea/flag-400.png" title="Korean">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ru">
+          
+          <img src="https://cdn.countryflags.com/thumbs/russia/flag-400.png" title="Russian">
+          
+        </a>
+      </li>
+    
+  </ul>
+</span>
+
+<script type="text/javascript">
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({
+    pageLanguage: 'en',
+    autoDisplay: false,
+    layout: google.translate.TranslateElement.InlineLayout.VERTICAL
+  }, 'google_translate_element');
+
+  // Links to cross-origin destinations are unsafe
+  var gll = document.getElementsByClassName('goog-logo-link')[0];
+  if (gll) {
+    gll.setAttribute('rel', 'noopener');
+  }
+
+  function restoreLang() {
+    var iframe = document.getElementsByClassName('goog-te-banner-frame')[0];
+    if (!iframe) return;
+
+    var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+    var restore_el = innerDoc.getElementsByTagName("button");
+
+    for (var i = 0; i < restore_el.length; i++) {
+      if (restore_el[i].id.indexOf("restore") >= 0) {
+        restore_el[i].click();
+        var close_el = innerDoc.getElementsByClassName("goog-close-link");
+        close_el[0].click();
+        return;
+      }
+    }
+  }
+
+  function triggerHtmlEvent(element, eventName) {
+    var event;
+    if (document.createEvent) {
+      event = document.createEvent('HTMLEvents');
+      event.initEvent(eventName, true, true);
+      element.dispatchEvent(event);
+    } else {
+      event = document.createEventObject();
+      event.eventType = eventName;
+      element.fireEvent('on' + event.eventType, event);
+    }
+  }
+
+  var googleCombo = document.querySelector("select.goog-te-combo");
+  var langSelect = document.querySelector('.ct-language');
+  langSelect.addEventListener('click', function(event) {
+    if (!event.target) {
+      return;
+    }
+
+    var selected = document.querySelector('.ct-language .ct-language-selected');
+    if (selected) {
+      selected.classList.remove('ct-language-selected');
+    }
+
+    var target = event.target;
+    while (target && target !== langSelect ) {
+      if (target.matches('.lang-select')) {
+        break;
+      }
+      target = target.parentElement;
+    }
+
+    if (target && target.matches('.lang-select')) {
+      var lang = target.getAttribute('data-lang');
+      if (googleCombo.value == lang) {
+        restoreLang();
+      } else {
+        target.parentElement.classList.add('ct-language-selected');
+        googleCombo.value = lang;
+        triggerHtmlEvent(googleCombo, 'change');
+      }
+    }
+
+    event.preventDefault();
+  });
+}
+</script>
+
+<script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+</span>
+</div>
+        </nav>
+</div>
+  </div>
+</header>
+
+<script>
+  function initHeader() {
+    var lastScrollY = getScrollPos().y;
+    var documentElement = document.documentElement;
+
+    function storeScrollData() {
+      var y = getScrollPos().y;var scrollStatus = "";
+
+      if (y <= 0) {
+        scrollStatus = "top";
+      } else if ((window.innerHeight + y) >= document.body.offsetHeight) {
+        scrollStatus = "bottom";
+      } else {
+        var isScrollDown = (y - lastScrollY > 0) ? true : false;
+        scrollStatus = isScrollDown ? "down" : "up";
+      }
+
+      lastScrollY = y;
+      documentElement.setAttribute("data-scroll-status", scrollStatus);
+    }
+
+    window.addEventListener('scroll', function(e) {
+      storeScrollData();
+    });
+
+    storeScrollData();
+  }
+  document.addEventListener('DOMContentLoaded', initHeader);
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+  function hashLocate(hashValue) {
+    hashValue = hashValue.replace(/^.*#h-/, '');
+    hashValue = decodeURIComponent(hashValue);
+    var element = document.getElementById(hashValue);
+
+    if (!element) {
+      return;
+    }
+
+    var header = document.querySelector('header.site-header');
+    var headerRect = header.getBoundingClientRect();
+    var headerTop = Math.floor(headerRect.top);
+    var headerHeight = Math.floor(headerRect.height);
+    var scrollPos = getScrollPos();
+    var offsetY = element.offsetTop - (headerTop + headerHeight + 20);
+
+    if (offsetY == scrollPos.y) {
+      return;
+    }
+
+    if (headerTop == 0  && offsetY > scrollPos.y) {
+      offsetY += headerHeight + 2;
+    } else if (headerTop < 0  && offsetY < scrollPos.y) {
+      offsetY -= headerHeight - 2;
+    }
+
+    smoothScrollTo(offsetY);
+  }
+
+  // The first event occurred
+  window.addEventListener('load', function(event) {
+    if (window.location.hash) {
+      hashLocate(window.location.hash);
+    }
+  });
+
+  // The first event occurred
+  window.addEventListener('click', function(event) {
+    if (event.target.tagName.toLowerCase() == 'a') {
+      hashLocate(event.target.getAttribute('href'));
+    }
+  });
+</script>
+<div class="theme-toggle">
+  <input type="checkbox" id="theme-switch">
+  <label for="theme-switch">
+    <div class="toggle"></div>
+    <div class="names">
+      <p class="light">Light</p>
+      <p class="dark">Dark</p>
+    </div>
+  </label>
+</div>
+
+
+
+
+<script>
+  (function() {
+    var sw = document.getElementById('theme-switch');
+    var html = document.getElementsByTagName('html')[0];
+    var nightModeOption = ('auto' || 'auto').toLowerCase();
+    var storage = nightModeOption === 'manual'
+        ? localStorage
+        : sessionStorage;
+    var themeData = loadThemeData();
+
+    function saveThemeData(data) {
+      storage.setItem('theme', JSON.stringify(data));
+    }
+
+    function loadThemeData() {
+      var data = storage.getItem('theme');
+      try {
+        data = JSON.parse(data ? data : '');
+      } catch(e) {
+        data = { nightShift: undefined, autoToggleAt: 0 };
+        saveThemeData(data);
+      }
+      return data;
+    }
+
+    function handleThemeToggle(nightShift) {
+      themeData.nightShift = nightShift;
+      saveThemeData(themeData);
+      html.dataset.theme = nightShift ? 'dark' : 'light';
+      setTimeout(function() {
+        sw.checked = nightShift ? true : false;
+      }, 50);
+    }
+
+    function autoThemeToggle() {
+      // Next time point of theme toggle
+      var now = new Date();
+      var toggleAt = new Date();
+      var hours = now.getHours();
+      var nightShift = hours >= 19 || hours <=7;
+
+      if (nightShift) {
+        if (hours > 7) {
+          toggleAt.setDate(toggleAt.getDate() + 1);
+        }
+        toggleAt.setHours(7);
+      } else {
+        toggleAt.setHours(19);
+      }
+
+      toggleAt.setMinutes(0);
+      toggleAt.setSeconds(0);
+      toggleAt.setMilliseconds(0)
+
+      var delay = toggleAt.getTime() - now.getTime();
+
+      // auto toggle theme mode
+      setTimeout(function() {
+        handleThemeToggle(!nightShift);
+      }, delay);
+
+      return {
+        nightShift: nightShift,
+        toggleAt: toggleAt.getTime()
+      };
+    }
+
+    // Listen the theme toggle event
+    sw.addEventListener('change', function(event) {
+      handleThemeToggle(event.target.checked);
+    });
+
+    if (nightModeOption == 'auto') {
+      var data = autoThemeToggle();
+
+      // Toggle theme by local setting
+      if (data.toggleAt > themeData.autoToggleAt) {
+        themeData.autoToggleAt = data.toggleAt;
+        handleThemeToggle(data.nightShift);
+      } else {
+        handleThemeToggle(themeData.nightShift);
+      }
+    } else if (nightModeOption == 'manual') {
+      handleThemeToggle(themeData.nightShift);
+    } else {
+      var nightShift = themeData.nightShift;
+      if (nightShift === undefined) {
+        nightShift = nightModeOption === 'on';
+      }
+      handleThemeToggle(nightShift);
+    }
+  })();
+</script>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <div class="framework">
+  <section class="main">
+
+     <div class="post">
+  <section>
+
+
+
+
+
+
+
+
+
+<header class="post-header">
+  <h1 class="post-title p-name" itemprop="name headline">Writing a custom malloc and free implementation using C</h1>
+  <h2 class="post-subtitle"></h2>
+
+  <p class="post-meta">
+    <time class="dt-published" datetime="2021-10-15T00:00:00+00:00" itemprop="datePublished"><i class="fa fa-calendar"></i> Oct 15, 2021
+    </time>
+
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <span class="post-reading-time left-vsplit"><i class="fa fa-clock-o"></i> About 16 mins</span>
+  </p>
+<div class="post-tags">
+<a class="post-tag" href="/tags.html#C">#C</a><a class="post-tag" href="/tags.html#Dynamic%20Memory">#Dynamic Memory</a><a class="post-tag" href="/tags.html#Malloc">#Malloc</a><a class="post-tag" href="/tags.html#Heap">#Heap</a>
+</div></header>
+<article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+    <div class="post-content e-content" itemprop="articleBody">
+
+      <p>Dynamic memory and malloc have been a staple feature in the C programming language. It is both feared and respected by people, as it provides great power but is also very easy to screw up. However, most people have never wondered what goes on under <code class="language-plaintext highlighter-rouge">malloc</code>, and just take things for granted. In this article, we will be exploring “under the hood” mechanisms of malloc, as well as coming up with our very own algorithm to allocate and de-allocate memory.</p>
+
+<p>The project’s source code can be found <a href="https://github.com/thebowenfeng/memalloc">here</a>.</p>
+
+<h3 id="what-is-heap-malloc-and-free">What is heap, malloc and free?</h3>
+<p><img src="https://i.kym-cdn.com/photos/images/newsfeed/001/909/636/a8c.png" alt="magic words"></p>
+
+<p>For anyone who is unfamiliar with C, or just dynamic memory in general, the <strong>heap</strong> is simply a section in memory that is reserved for you, the programmer, to put stuff in it. You can imagine it as an invisible, flexible global array that you can read/write anytime, anywhere, within your program. The heap is not to be confused with the heap data structure, they are completely two different concepts. Whereas the “stack” is built using a stack data structure, the heap is <strong>not</strong> built using a heap data structure.</p>
+
+<p>Malloc, then, would simply be a function that allocates (reserves) some memory on the heap for you, should you need it. For instance, if I need to store an integer on the heap, I would simply call <code class="language-plaintext highlighter-rouge">malloc</code>, give it the size of an integer, and <code class="language-plaintext highlighter-rouge">malloc</code> will give me a pointer, pointing to the location of my integer variable. Of course, malloc isn’t restricted to only basic datatypes. For instance, you could also malloc custom structs.</p>
+
+<p>Free is the anti-malloc. Whereas malloc reserves memory space for you, <code class="language-plaintext highlighter-rouge">free</code> takes away that reservation and returns memory back to the OS. Obviously once we no longer need something that we malloc’d on the heap, it would be ideal that we “throw away” that variable and let something else use the available space. If we do not, then a “memory leak” would occur, where your program will continuously consume memory until your OS crashes.</p>
+
+<h3 id="memory-fragmentation-and-the-difficulty-of-a-good-malloc-algorithm">Memory fragmentation and the difficulty of a good malloc algorithm</h3>
+<p>So imagine if we had a global, array of bytes (char) that act as our very own heap. Since it is global, functionally speaking, it would be very similar to the actual heap, where we can access it anywhere in our program and store information on it.</p>
+
+<p>Now imagine if we have a naive malloc algorithm that simply linearly scan through the heap, start to finish, and chuck things in there if it finds a big enough space. Similarly, the free algorithm will simply overwrite existing bytes with null bytes if needed.</p>
+
+<p>Now, say we want to store a variable of size 5 bytes to the heap. Since the heap is empty, the algorithm simply put it at the start of the heap, like this:</p>
+
+<p><img src="https://i.imgur.com/tu9gi4u.png" alt="First heap assign"></p>
+
+<p>Ok great, now we want, let’s say, 3 bytes of data on the heap. Logically, the algorithm will scan through the heap, go to the end of the 5 bytes data, and put the 3 bytes there, like this.
+<img src="https://i.imgur.com/rfSpaCB.png" alt="Second heap assign"></p>
+
+<p>Now, let’s say we want to have, another 5 bytes assigned. So we put it after the 3 bytes, like this:
+<img src="https://i.imgur.com/nxOrmWf.png" alt="Third heap assign"></p>
+
+<p>Now the interesting stuff happens. We want to <em>free</em> the middle “3 bytes” of data. Okay, fairly straightforward, we simply nullify the 3 bytes of data.</p>
+
+<p><img src="https://i.imgur.com/cnNAOPP.png" alt="Free 3 bytes"></p>
+
+<p>Some of you might already know where I’m going with this (hint: memory fragmentation) but to solidify my point, let’s now attempt to assign 10 bytes of data.</p>
+
+<p>The algorithm scans through the heap, finds the 3 bytes of free space. <strong>However</strong>, because it is too small to contain the 10 bytes of data, it gives up and continues on until the very end, and put the 10 bytes <strong>after</strong> the last 5 bytes of data, like this:</p>
+
+<p><img src="https://i.imgur.com/BvyDyBl.png" alt="Fragmentation"></p>
+
+<p>So, now we basically have this 3 byte gap in the memory, which will forever remain there unless something smaller or equal than 3 bytes is to be assigned to the heap.</p>
+
+<p>This is called <strong>memory fragmentation</strong>, where memory in your program allocated in non-contiguous (continuous) blocks, essentially leaving unusable gaps in-between. In other words, not utilizing the full capacity of your memory, or wasting memory. It is a very fundamental problem that malloc has to solve in order to be space efficient.</p>
+
+<p>In order to solve this, there are two basic methods:</p>
+<ol>
+  <li>You could dynamically re-organize the heap once something is free’d. In our case, we would push the 2nd “5 byte” data backwards in order to fill in the gap.</li>
+  <li>You could store data non-contiguously. In our case, for the 10 byte data, we could store 3 bytes of it in the tiny gap, and the rest (7 bytes) after, with information linking the two “blocks” together.</li>
+</ol>
+
+<p><img src="https://i.imgur.com/gAdJzwn.png" alt="Method 2">
+(Diagram demonstrating method 2)</p>
+
+<p>The first method is inefficient, slow, and impractical. If we forget the computational resource needed to re-organize the heap, changing the location of data means we also have the change the location of the pointers allocated to those data, otherwise the pointers will be pointing at garbage value.</p>
+
+<p>The second method is a bit slow, requires extra space, but much faster than the first alternative, and completely solves memory fragmentation. Most modern compilers will use a similar idea (in terms of dividing memory into blocks and looking for free blocks/reserving blocks), and it will be the basis for my own malloc algorithm.</p>
+
+<h3 id="the-malloc-algorithm">The malloc algorithm</h3>
+
+<p>As discussed above, the core concept behind this algorithm is to divide memory into blocks. One piece of data could be split between multiple blocks, and linked together using a linked list. When reading/writing the data, we simply need to traverse the linked list.</p>
+
+<p>Each memory block will contain the following data:</p>
+<ul>
+  <li>Address: The index location of the first byte on the heap covered by the current block. Remember, the heap is simply a char array.</li>
+  <li>Size: The size of the current memory block. In other words, how many bytes does this block cover.</li>
+  <li>Next: A pointer to the next block, should a piece of data be split between multiple blocks. This can be NULL.</li>
+  <li>isFree: A flag variable that marks whether or not this memory block is free to be used, or reserved for something.</li>
+</ul>
+
+<p>In this case, malloc would be responsible for assigning, creating and splitting memory blocks, so it is the most complicated part of the entire project. For each memory block encountered, there are three possibilities:</p>
+<ol>
+  <li>The given data is bigger than the memory block’s capacity</li>
+  <li>The given data is smaller than the memory block’s capacity</li>
+  <li>The given data has the same size as the memory block’s capacity</li>
+  <li>No free memory block exists.</li>
+</ol>
+
+<h4 id="case-3-same-size">Case 3 (same size)</h4>
+
+<p>Let’s start off with the simpliest case, where the given data perfectly matches the size of a memory block. In this case, our work is easy. We simply need modify the heap at the address (see block struct definition above), with the size of the block. Nullify the next pointer of the block, as the data is only contained in this block alone, and return the address of the block.</p>
+
+<h4 id="case-4-no-free-block">Case 4 (no free block)</h4>
+
+<p>This case is also relatively easy to handle. This means that every single memory block is filled/reserved, and we need to create a new memory block. We would simply need to find the “max address”, or the block that is the furthermost to the right of the heap (as the heap is filled from left to right), then create a new block that is right after the last block. The size of the block will be the data size, and obviously next pointer will be NULL. Return the address, and add the block to a global memory block array (or you can malloc it on the heap but that’s a bit ironic, considering we are trying to write our own malloc).</p>
+
+<h4 id="case-1-bigger-than">Case 1 (bigger than)</h4>
+
+<p>Now we move onto a more interesting case. What if the data size is bigger than the size of the current memory block? Well, as demonstrated in the example scenario above (10 bytes scenario), we would simply “split” the data into 2 parts. The first part would be stored in the current memory block, and the next part would be stored in the next available position. Except there is one more important detail: The “next” part can also be subsequently split, if the next available memory block has a smaller size than the “next” part. So, for instance, in our above example, let’s say the next available memory block is also 3 bytes, then the remaining “7 bytes” would be again split into 3 bytes, and now the remaining would be 4 bytes.</p>
+
+<p>In the actual program, once we have found an available memory block, we would copy the first N bytes of the data into the heap, at the current given address. Then, we would have a marker variable that marks the start of the 2nd (next) partition, essentially, splitting the data into 2 parts. The function will then continue scanning for memory blocks until it finds another free one (or cannot find one, in which case we go to <strong>Case 4</strong>), and applies the same processes depending on the circumstances. The partition could either be split into 2 partitions again, or it could be stored entirely in a block that’s big enough (<strong>Case 2 or 3</strong>). In any case, we would also need to link the current memory block to the next memory block. We can accomplish this by saving the current memory block somewhere, and when we do find an appropriate block, edit the saved block and link it.</p>
+
+<p>Basically, we “recursively” apply the function to the 2nd partition (except there is no need for actual recursion), until we have successfully stored all parts of the data.</p>
+
+<h4 id="case-2-smaller-than">Case 2 (smaller than)</h4>
+
+<p>This is, in my opinion, the most interesting and also the most complicated case. What if our data is smaller than the current block’s capacity? Well, I suppose you could just store it in there and call it a day, but doing so will defeat the purpose of the entire algorithm, as it will cause memory fragmentation. The “leftover” bits in the block will be sitting there, inaccessible to any other data as the entire block is reserved.</p>
+
+<p>So, the solution is to split the block. You might be observing a pattern here. Previously, we split the data because it is bigger, now we split the actual memory block because it is bigger. So how do we actually split it?</p>
+
+<p>Well, we can’t actually physically “split” something. What we do, is we can adjust the current block, and create a new block, representing the leftover space of the current block. The reason why we need to specifically create a new block, is to ensure the entire heap is covered in memory blocks. If we do not, then again, there will be a gap, inaccessible as it is not mapped to any existing memory block.</p>
+
+<p>So, in our function, we would calculate the size difference. We would adjust the current memory block, by decreasing its size to the data’s size. Then, we would create a new block, much like how we created a new block in <strong>Case 4</strong>, except the size will instead be the “size difference” we have calculated just then. The new block will be marked available for use, and a new piece of data in the future could utilize that block.</p>
+
+<h4 id="analysis-of-speed-and-efficiency">Analysis of speed and efficiency</h4>
+
+<p>So now that we have covered the algorithm, we could examine its time and space complexity. Let’s start off with time</p>
+
+<p>Obviously, at the very start, the time complexity would be very close to O(1), since there are no memory blocks (or not too much) yet. However, as we go on to use the heap, the complexity will gradually increase, where the worst case scenario would be O(n), where each block has been sub-divided so many times that its size is 1 byte. However, such case is unlikely, as it requires a lot of tiny data being malloc’d onto the heap. In general, the time complexity would be O(n / k), where n represents the heap size, and k represents the average data size. Obviously, k cannot be larger than n, so as k grows larger (a lot of huge data), less memory blocks is needed and less traverse time.</p>
+
+<p>Space complexity is essentially the same. At the start, there will be very little space used to store memory blocks, but as time goes on, the space required to store all the blocks will inevitably grow. Similarly, frequent use of smaller data will cause the memory blocks to be sub-divided further, thus increasing space to store blocks.</p>
+
+<p>The average case? Hard to say, because it really depends on how you are using the heap. The main issue with this algorithm is the space complexity, not necessarily the time complexity. Even a O(n) time complexity would be extremely fast for most use cases. However, a O(n) space complexity would be quite disastrous, as there will literally be more space used to store these blocks, than the actual size of the heap, again defeating the purpose of the algorithm.</p>
+
+<h3 id="the-free-algorithm">The free algorithm</h3>
+
+<p>The free algorithm, in our case, is very straightforward, given the foundation we have built in the malloc algorithm. Given a valid address to the heap, we linear scan all memory blocks, find the block with the corresponding address, then traverse the entire linked list of blocks, and mark each and every block as “free”. That’s it, not special tricks needed.</p>
+
+<h3 id="readwrite-to-heap">Read/write to heap</h3>
+
+<p>What’s the use of the heap if we can’t access it? Of course we need functions that are able to extract the information that is stored on the heap. Luckily, given the foundation built by malloc, reading and writing is very easy.</p>
+
+<p>Similarly to <code class="language-plaintext highlighter-rouge">free</code>, we need to scan through memory blocks until a matching block is found, with the correct address. But instead of marking blocks as “free”, we simply copy the content on the heap, at each block’s address, into a buffer variable and traverse to the next block.</p>
+
+<p>For writing, the reverse is done, where we would copy the stuff <strong>from</strong> the buffer <strong>to</strong> the heap at the given address at the current block.</p>
+
+<p>A possible problem is with the current implementation is that it is reliant on the end-user to supply our R/W functions (read/write) with a valid address. What if they supplied a garbage address, yet it coincidentally matches a memory block? The program have no way to distinguish and will treat it as a “starting block”. Although the fix for this would be quite trivial. Simply add another flag to the block, <code class="language-plaintext highlighter-rouge">isStarting</code>, that marks whether or not the current given block is the starting block.</p>
+
+<h3 id="final-thoughts">Final thoughts</h3>
+
+<p>No doubt modern, robust compilers like GCC will have a way more optimal algorithm for malloc and free, yet the core concept between most modern malloc algorithms stay the same. They all rely on the concept of dividing memory into different blocks. This is precisely the reason why sometimes malloc feels sluggish and slow. Whilst you can comfortably sit there and enjoy memory being magically given to you, malloc has to do the hard work of managing your heap to minimize memory being wasted. As with most algorithms in Computer Science, there will often be a trade-off between time and space. In this case, “space” is your heap and time is the speed of malloc. A naive malloc will no doubt be speedy, but the speed trade-off is huge. Conversely, a “space-optimized” algorithm like this requires time. So, in the end, it is about finding the right <em>balance</em>. As Thanos would say “Perfectly balanced, as all things should be”.</p>
+
+<p><img src="https://www.meme-arsenal.com/memes/de7e96af20765406d4b81d81cffc6268.jpg" alt="Thanos"></p>
+
+
+    </div>
+
+</article>
+<div class="post-nav">
+<a class="previous" href="/projects/ai/2021/09/29/musegen.html" title="Generating Music using Recurrent Neural Networks">Generating Music using Recurrent Neural Networks...</a><a class="next" href="/projects/ai/computer%20vision/2022/01/07/ai-gamer.html" title="Using CNNs to autonomously play videogames">Using CNNs to autonomously play videogames...</a>
+</div>
+<div class="post-related">
+      <div>Related Articles</div>
+      <ul>
+        <li><a class="post-link" href="/projects/ai/2021/09/29/musegen.html" title="Using CNNs to autonomously play videogames">Generating Music using Recurrent Neural Networks</a></li>
+<li><a class="post-link" href="/projects/reverse%20engineering/2022/07/26/polymorphic-engine.html" title="Using CNNs to autonomously play videogames">Bypass code detection with polymorphic code engine</a></li>
+<li><a class="post-link" href="/projects/nlp/2020/01/17/markov-chatbot.html" title="Using CNNs to autonomously play videogames">Using Markov Chains to simulate human speech</a></li>
+<li><a class="post-link" href="/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html" title="Using CNNs to autonomously play videogames">Performing a mid-function trampoline hook using C++</a></li>
+</ul>
+    </div>
+<div class="post-comments"></div></section>
+</div>
+
+
+  </section>
+  <section class="sidebar" style="margin-left: 15px;">
+    <!-- Get sidebar items --><style type="text/css" media="screen">
+.post-menu ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+</style>
+
+<div class="post-menu">
+  <div class="post-menu-title">TOC</div>
+  <div class="post-menu-content"></div>
+</div>
+
+<script>
+  function generateContent() {
+    var menu = document.querySelector(".post-menu");
+    var menuContent =  menu.querySelector(".post-menu-content");
+    var headings = document.querySelector(".post-content").querySelectorAll("h2, h3, h4, h5, h6");
+
+    // Hide menu when no headings
+    if (headings.length === 0) {
+      return menu.style.display = "none";
+    }
+
+    // Generate post menu
+    var menuHTML = '';
+    for (var i = 0; i < headings.length; i++) {
+      var h = headings[i];
+      menuHTML += (
+        '<li class="h-' + h.tagName.toLowerCase() + '">'
+        + '<a href="#h-' + h.getAttribute('id') + '">' + h.textContent + '</a></li>');
+    }
+
+    menuContent.innerHTML = '<ul>' + menuHTML + '</ul>';
+
+    // The header element
+    var header = document.querySelector('header.site-header');
+
+    function doMenuCollapse(index, over_items) {
+      var items = menuContent.firstChild.children;
+
+      if (over_items == undefined) {
+        over_items = 20;
+      }
+
+      if (items.length < over_items) {
+        return;
+      }
+
+      var activeItem = items[index];
+      var beginItem = activeItem
+      var endItem = activeItem
+      var beginIndex = index;
+      var endIndex = index + 1;
+      while (beginIndex >= 0
+        && !items[beginIndex].classList.contains('h-h2')) {
+        beginIndex -= 1;
+      }
+      while (endIndex < items.length
+        && !items[endIndex].classList.contains('h-h2')) {
+        endIndex += 1;
+      }
+      for (var i = 0; i < beginIndex; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+      for (var i = beginIndex + 1; i < endIndex; i++) {
+        item = items[i]
+        // if (!item.classList.contains('h-h2')) {
+          item.style.display = '';
+        // }
+      }
+      for (var i = endIndex; i < items.length; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+    }
+
+    // Init menu collapsed
+    doMenuCollapse(-1);
+
+    // Active the menu item
+    window.addEventListener('scroll', function (event) {
+      var lastActive = menuContent.querySelector('.active');
+      var changed = true;
+      var activeIndex = -1;
+      for (var i = headings.length - 1; i >= 0; i--) {
+        var h = headings[i];
+        var headingRect = h.getBoundingClientRect();
+        var headerRect = header.getBoundingClientRect();
+        var headerTop = Math.floor(headerRect.top);
+        var headerHeight = Math.floor(headerRect.height);
+        var headerHeight = headerTop + headerHeight + 20;
+        if (headingRect.top <= headerHeight) {
+          var id = 'h-' + h.getAttribute('id');
+          var a = menuContent.querySelector('a[href="#' + id  + '"]');
+          var curActive = a.parentNode;
+          if (curActive) {
+            curActive.classList.add('active');
+            activeIndex = i;
+          }
+          if (lastActive == curActive) {
+            changed = false;
+          }
+          break;
+        }
+      }
+      if (changed) {
+        if (lastActive) {
+          lastActive.classList.remove('active');
+        }
+        doMenuCollapse(activeIndex);
+      }
+      event.preventDefault();
+    });
+  }
+  generateContent();
+</script>
+</section>
+</div>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/"></data>
+
+  <div class="wrapper">
+    <div class="site-footer-inner">
+<div>Copyright <span class="copyleft">©</span> 2017-2024 Bowen Feng</div>
+      <div>Powered by <a title="Jekyll is a simple, blog-aware, static site
+      generator." href="http://jekyllrb.com/">Jekyll</a> &amp; <a title="Yat, yet
+      another theme." href="https://github.com/jeffreytse/jekyll-theme-yat">Yat Theme</a>.</div>
+      <div class="footer-col rss-subscribe">Subscribe <a href="/feed.xml">via RSS</a>
+</div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

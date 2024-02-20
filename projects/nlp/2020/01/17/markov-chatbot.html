@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="google-translate-customization" content="108d9124921d80c3-80e20d618ff053c8-g4f02ec6f3dba68b7-c">
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Using Markov Chains to simulate human speech | Bowen’s Blog</title>
+<meta name="generator" content="Jekyll v4.3.3">
+<meta property="og:title" content="Using Markov Chains to simulate human speech">
+<meta name="author" content="Bowen Feng">
+<meta property="og:locale" content="en_US">
+<meta name="description" content="Nowadays there are many sophisticated ways to approach NLP, most of them involves neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP and can be used in a variety of fields.">
+<meta property="og:description" content="Nowadays there are many sophisticated ways to approach NLP, most of them involves neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP and can be used in a variety of fields.">
+<link rel="canonical" href="https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html">
+<meta property="og:url" content="https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html">
+<meta property="og:site_name" content="Bowen’s Blog">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2020-01-17T00:00:00+00:00">
+<meta name="twitter:card" content="summary">
+<meta property="twitter:title" content="Using Markov Chains to simulate human speech">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Bowen Feng"},"dateModified":"2020-01-17T00:00:00+00:00","datePublished":"2020-01-17T00:00:00+00:00","description":"Nowadays there are many sophisticated ways to approach NLP, most of them involves neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP and can be used in a variety of fields.","headline":"Using Markov Chains to simulate human speech","mainEntityOfPage":{"@type":"WebPage","@id":"https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html"},"url":"https://blog.bowenfeng.xyz/projects/nlp/2020/01/17/markov-chatbot.html"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="shortcut icon" href="">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-noto-sans@0.0.72/index.min.css">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <script src="/assets/js/main.js"></script><link type="application/atom+xml" rel="alternate" href="https://blog.bowenfeng.xyz/feed.xml" title="Bowen's Blog">
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/default.min.css">
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js"></script>
+<!-- and it's easy to individually load additional languages -->
+<script charset="UTF-8" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/languages/go.min.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+// Init highlight js
+document.addEventListener('DOMContentLoaded', function(event) {
+  var els = document.querySelectorAll('pre code')
+
+  function addLangData(block) {
+    var outer = block.parentElement.parentElement.parentElement;
+    var lang = block.getAttribute('data-lang');
+    for (var i = 0; i < outer.classList.length; i++) {
+      var cls = outer.classList[i];
+      if (cls.startsWith('language-')) {
+        lang = cls;
+        break;
+      }
+    }
+    if (!lang) {
+      cls = block.getAttribute('class');
+      lang = cls ? cls.replace('hljs ', '') : '';
+    }
+    if (lang.startsWith('language-')) {
+      lang = lang.substr(9);
+    }
+    block.setAttribute('class', 'hljs ' + lang);
+    block.parentNode.setAttribute('data-lang', lang);
+  }
+
+  function addBadge(block) {
+    var enabled = ('true' || 'true').toLowerCase();
+    if (enabled == 'true') {
+      var pre = block.parentElement;
+      pre.classList.add('badge');
+    }
+  }
+
+  function handle(block) {
+    addLangData(block);
+    addBadge(block)
+    hljs.highlightBlock(block);
+  }
+
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    handle(el);
+  }
+});
+</script>
+
+<style>
+  /* code language badge */
+  pre.badge::before {
+    content: attr(data-lang);
+    color: #fff;
+    background-color: #ff4e00;
+    padding: 0 .5em;
+    border-radius: 0 2px;
+    text-transform: uppercase;
+    text-align: center;
+    min-width: 32px;
+    display: inline-block;
+    position: absolute;
+    right: 0;
+  }
+
+  /* fix wrong badge display for firefox browser */
+  code > table pre::before {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<header class="site-header " role="banner">
+
+  <div class="wrapper">
+    <div class="site-header-inner">
+<span class="site-brand"><a class="site-brand-inner" rel="author" href="/">
+  <img class="site-favicon" title="Bowen's Blog" src="" onerror="this.style.display='none'">
+  Bowen's Blog
+</a>
+</span><nav class="site-nav">
+          <input type="checkbox" id="nav-trigger" class="nav-trigger">
+          <label for="nav-trigger">
+            <span class="menu-icon">
+              <svg viewbox="0 0 18 15" width="18px" height="15px">
+                <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"></path>
+              </svg>
+            </span>
+          </label>
+
+          <div class="trigger">
+<a class="page-link" href="/about.html">ABOUT</a><a class="page-link" href="/archives.html">ARCHIVES</a><a class="page-link" href="/categories.html">CATEGORIES</a><a class="page-link" href="/">HOME</a><a class="page-link" href="/tags.html">TAGS</a>
+
+
+
+
+
+
+
+
+
+<span class="page-link">
+
+
+
+<div id="google_translate_element" style="display: none;">
+</div>
+
+<span class="ct-language">
+  <ul class="list-unstyled ct-language-dropdown">
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="en">
+          
+          <img src="https://cdn.countryflags.com/thumbs/united-states-of-america/flag-400.png" title="English">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="fr">
+          
+          <img src="https://cdn.countryflags.com/thumbs/france/flag-400.png" title="French">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="zh-CN">
+          
+          <img src="https://cdn.countryflags.com/thumbs/china/flag-400.png" title="Chinese(Simple)">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ja">
+          
+          <img src="https://cdn.countryflags.com/thumbs/japan/flag-400.png" title="Japanese">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ko">
+          
+          <img src="https://cdn.countryflags.com/thumbs/south-korea/flag-400.png" title="Korean">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ru">
+          
+          <img src="https://cdn.countryflags.com/thumbs/russia/flag-400.png" title="Russian">
+          
+        </a>
+      </li>
+    
+  </ul>
+</span>
+
+<script type="text/javascript">
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({
+    pageLanguage: 'en',
+    autoDisplay: false,
+    layout: google.translate.TranslateElement.InlineLayout.VERTICAL
+  }, 'google_translate_element');
+
+  // Links to cross-origin destinations are unsafe
+  var gll = document.getElementsByClassName('goog-logo-link')[0];
+  if (gll) {
+    gll.setAttribute('rel', 'noopener');
+  }
+
+  function restoreLang() {
+    var iframe = document.getElementsByClassName('goog-te-banner-frame')[0];
+    if (!iframe) return;
+
+    var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+    var restore_el = innerDoc.getElementsByTagName("button");
+
+    for (var i = 0; i < restore_el.length; i++) {
+      if (restore_el[i].id.indexOf("restore") >= 0) {
+        restore_el[i].click();
+        var close_el = innerDoc.getElementsByClassName("goog-close-link");
+        close_el[0].click();
+        return;
+      }
+    }
+  }
+
+  function triggerHtmlEvent(element, eventName) {
+    var event;
+    if (document.createEvent) {
+      event = document.createEvent('HTMLEvents');
+      event.initEvent(eventName, true, true);
+      element.dispatchEvent(event);
+    } else {
+      event = document.createEventObject();
+      event.eventType = eventName;
+      element.fireEvent('on' + event.eventType, event);
+    }
+  }
+
+  var googleCombo = document.querySelector("select.goog-te-combo");
+  var langSelect = document.querySelector('.ct-language');
+  langSelect.addEventListener('click', function(event) {
+    if (!event.target) {
+      return;
+    }
+
+    var selected = document.querySelector('.ct-language .ct-language-selected');
+    if (selected) {
+      selected.classList.remove('ct-language-selected');
+    }
+
+    var target = event.target;
+    while (target && target !== langSelect ) {
+      if (target.matches('.lang-select')) {
+        break;
+      }
+      target = target.parentElement;
+    }
+
+    if (target && target.matches('.lang-select')) {
+      var lang = target.getAttribute('data-lang');
+      if (googleCombo.value == lang) {
+        restoreLang();
+      } else {
+        target.parentElement.classList.add('ct-language-selected');
+        googleCombo.value = lang;
+        triggerHtmlEvent(googleCombo, 'change');
+      }
+    }
+
+    event.preventDefault();
+  });
+}
+</script>
+
+<script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+</span>
+</div>
+        </nav>
+</div>
+  </div>
+</header>
+
+<script>
+  function initHeader() {
+    var lastScrollY = getScrollPos().y;
+    var documentElement = document.documentElement;
+
+    function storeScrollData() {
+      var y = getScrollPos().y;var scrollStatus = "";
+
+      if (y <= 0) {
+        scrollStatus = "top";
+      } else if ((window.innerHeight + y) >= document.body.offsetHeight) {
+        scrollStatus = "bottom";
+      } else {
+        var isScrollDown = (y - lastScrollY > 0) ? true : false;
+        scrollStatus = isScrollDown ? "down" : "up";
+      }
+
+      lastScrollY = y;
+      documentElement.setAttribute("data-scroll-status", scrollStatus);
+    }
+
+    window.addEventListener('scroll', function(e) {
+      storeScrollData();
+    });
+
+    storeScrollData();
+  }
+  document.addEventListener('DOMContentLoaded', initHeader);
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+  function hashLocate(hashValue) {
+    hashValue = hashValue.replace(/^.*#h-/, '');
+    hashValue = decodeURIComponent(hashValue);
+    var element = document.getElementById(hashValue);
+
+    if (!element) {
+      return;
+    }
+
+    var header = document.querySelector('header.site-header');
+    var headerRect = header.getBoundingClientRect();
+    var headerTop = Math.floor(headerRect.top);
+    var headerHeight = Math.floor(headerRect.height);
+    var scrollPos = getScrollPos();
+    var offsetY = element.offsetTop - (headerTop + headerHeight + 20);
+
+    if (offsetY == scrollPos.y) {
+      return;
+    }
+
+    if (headerTop == 0  && offsetY > scrollPos.y) {
+      offsetY += headerHeight + 2;
+    } else if (headerTop < 0  && offsetY < scrollPos.y) {
+      offsetY -= headerHeight - 2;
+    }
+
+    smoothScrollTo(offsetY);
+  }
+
+  // The first event occurred
+  window.addEventListener('load', function(event) {
+    if (window.location.hash) {
+      hashLocate(window.location.hash);
+    }
+  });
+
+  // The first event occurred
+  window.addEventListener('click', function(event) {
+    if (event.target.tagName.toLowerCase() == 'a') {
+      hashLocate(event.target.getAttribute('href'));
+    }
+  });
+</script>
+<div class="theme-toggle">
+  <input type="checkbox" id="theme-switch">
+  <label for="theme-switch">
+    <div class="toggle"></div>
+    <div class="names">
+      <p class="light">Light</p>
+      <p class="dark">Dark</p>
+    </div>
+  </label>
+</div>
+
+
+
+
+<script>
+  (function() {
+    var sw = document.getElementById('theme-switch');
+    var html = document.getElementsByTagName('html')[0];
+    var nightModeOption = ('auto' || 'auto').toLowerCase();
+    var storage = nightModeOption === 'manual'
+        ? localStorage
+        : sessionStorage;
+    var themeData = loadThemeData();
+
+    function saveThemeData(data) {
+      storage.setItem('theme', JSON.stringify(data));
+    }
+
+    function loadThemeData() {
+      var data = storage.getItem('theme');
+      try {
+        data = JSON.parse(data ? data : '');
+      } catch(e) {
+        data = { nightShift: undefined, autoToggleAt: 0 };
+        saveThemeData(data);
+      }
+      return data;
+    }
+
+    function handleThemeToggle(nightShift) {
+      themeData.nightShift = nightShift;
+      saveThemeData(themeData);
+      html.dataset.theme = nightShift ? 'dark' : 'light';
+      setTimeout(function() {
+        sw.checked = nightShift ? true : false;
+      }, 50);
+    }
+
+    function autoThemeToggle() {
+      // Next time point of theme toggle
+      var now = new Date();
+      var toggleAt = new Date();
+      var hours = now.getHours();
+      var nightShift = hours >= 19 || hours <=7;
+
+      if (nightShift) {
+        if (hours > 7) {
+          toggleAt.setDate(toggleAt.getDate() + 1);
+        }
+        toggleAt.setHours(7);
+      } else {
+        toggleAt.setHours(19);
+      }
+
+      toggleAt.setMinutes(0);
+      toggleAt.setSeconds(0);
+      toggleAt.setMilliseconds(0)
+
+      var delay = toggleAt.getTime() - now.getTime();
+
+      // auto toggle theme mode
+      setTimeout(function() {
+        handleThemeToggle(!nightShift);
+      }, delay);
+
+      return {
+        nightShift: nightShift,
+        toggleAt: toggleAt.getTime()
+      };
+    }
+
+    // Listen the theme toggle event
+    sw.addEventListener('change', function(event) {
+      handleThemeToggle(event.target.checked);
+    });
+
+    if (nightModeOption == 'auto') {
+      var data = autoThemeToggle();
+
+      // Toggle theme by local setting
+      if (data.toggleAt > themeData.autoToggleAt) {
+        themeData.autoToggleAt = data.toggleAt;
+        handleThemeToggle(data.nightShift);
+      } else {
+        handleThemeToggle(themeData.nightShift);
+      }
+    } else if (nightModeOption == 'manual') {
+      handleThemeToggle(themeData.nightShift);
+    } else {
+      var nightShift = themeData.nightShift;
+      if (nightShift === undefined) {
+        nightShift = nightModeOption === 'on';
+      }
+      handleThemeToggle(nightShift);
+    }
+  })();
+</script>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <div class="framework">
+  <section class="main">
+
+     <div class="post">
+  <section>
+
+
+
+
+
+
+
+
+
+<header class="post-header">
+  <h1 class="post-title p-name" itemprop="name headline">Using Markov Chains to simulate human speech</h1>
+  <h2 class="post-subtitle"></h2>
+
+  <p class="post-meta">
+    <time class="dt-published" datetime="2020-01-17T00:00:00+00:00" itemprop="datePublished"><i class="fa fa-calendar"></i> Jan 17, 2020
+    </time>
+
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <span class="post-reading-time left-vsplit"><i class="fa fa-clock-o"></i> About 7 mins</span>
+  </p>
+<div class="post-tags">
+<a class="post-tag" href="/tags.html#Python">#Python</a><a class="post-tag" href="/tags.html#Markov%20Chains">#Markov Chains</a><a class="post-tag" href="/tags.html#Chatbot">#Chatbot</a><a class="post-tag" href="/tags.html#NLP">#NLP</a>
+</div></header>
+<article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+    <div class="post-content e-content" itemprop="articleBody">
+
+      <p>Nowadays there are many sophisticated ways to approach NLP, most of them involves
+neural networks. For example, OpenAI’s GPT2 has achieved phenomenonal results in NLP
+and can be used in a variety of fields.</p>
+
+<p>However, can something as simple as Markov Chains compete with sophisticated techniques
+like RNNs, or even better, GPT-2? <em>Hint: It can’t but I thought it was interesting</em></p>
+
+<p>Skip to the bottom for the technical implementation. <a href="https://github.com/thebowenfeng/markov_chatbot-new-">Github project link here</a></p>
+
+<h2 id="what-are-markov-chains">What are markov chains?</h2>
+
+<p>In mathematical terms, a <strong>Markov Chain</strong> is defined as</p>
+<blockquote>
+  <p>A directed graph with weighted edges connecting states with each other.</p>
+</blockquote>
+
+<p><em>Definition may vary</em></p>
+
+<p>In English, a Markov Chain is essentially an algorithm that selects the next most
+possible event, based on previous events, using probabilities. Similar to a RNN
+(Recurrent Neural Networks), it is able to predict the next <em>state</em> based on
+information on previous states. However, unlike a Recurrent Neural Network, 
+its algorithm is much more simplistic, and relies on pure probability.</p>
+
+<p>What this means is that, if event A -&gt; event B frequently leads to event C, then
+event C will more likely to be chosen as the next “predicted state”</p>
+
+<h2 id="how-does-markov-chains-work-in-a-chatbot">How does Markov Chains work in a chatbot</h2>
+
+<p>Knowing how Markov Chains work, we could swap <em>states</em> to <em>words</em> in a sentence.
+In other words, the next “state” being predicted will simply be the next word in 
+a given sentence.</p>
+
+<p>This might sound like a brilliant idea. After all, words that appear together frequently
+are more likely to make sense. For instance, given the words “I” and “am”, the algorithm
+is likely to predict the word “fine”, as “I am fine” frequently appears together.</p>
+
+<p>Therefore, Markov Chains should generate perfect human sentences (or at least near perfect),
+right?</p>
+
+<p><img src="https://c.tenor.com/uYn6YAkOoi0AAAAM/duck-no.gif" alt="Duck saying NO"></p>
+
+<h2 id="problems-with-markov-chains-and-nlp">Problems with Markov Chains and NLP</h2>
+
+<p>Its really easy to miss, and obviously my observations are with the benefit of hindsight, but
+if we rely on pure probabilities, then sentences will not make logical sense, despite
+possessing “flow”.</p>
+
+<p>You see, just because a sentence flows along nicely, does not necessarily mean it makes
+logical sense, or contains any meaning. Let’s take the following sentence:</p>
+<ul>
+  <li>“I am really good with guns should be banned”</li>
+</ul>
+
+<p>Now you may think “what a weird sentence”, and you’d be absolutely right in your observation.
+This sentence, by most definitions, makes <strong>zero</strong> sense. In fact, it looks like
+two sentences clumped together, namely “I am really good with guns” and “guns should be banned”.</p>
+
+<p>So, despite the fact that each word in the sentence “connects” to the next word,
+the sentence as a whole fails to give any meaning. This is the problem with Markov Chains.</p>
+
+<p>Now, as a reminder, Markov Chains work by taking in several previous words, and attempt
+to predict the next words. This leads to several problems:</p>
+
+<h4 id="corpus">Corpus</h4>
+
+<p>As with most “Machine Learning” algorithms, this algorithm is trained on a large blob
+of text. The problem with text is that it will typically vary in meaning, even if it came from a singular
+source. Because of the way Markov Chains work, the text will have to be broken into
+small tokens (discussed later), which maps a set of words with the next word in the sequence
+(For instance, I am good thanks might become “I am good”, “am good thanks”).</p>
+
+<p>This means that <em>tokens</em> from a variety of different sentences will be mixed together. 
+As Markov Chains are based on probabilities, it does not care if a token exists within
+the same context as a previous used token. So, obviously this can lead the problems like
+the above sentence, where individual “tokens” might make sense, but because
+said tokens exists in different context, the resulting sentence makes no sense.</p>
+
+<h4 id="scope">Scope</h4>
+
+<p>Scope, in this case, refers to <em>How much stuff is the algorithm taking into account,
+when predicting the next word?</em>, and the answer is <em>not much actually</em>.</p>
+
+<p>You see, when predicting the next word, the algorithm only cares for the previous
+few words. After predicting, it completely forgets and starts anew. This is akin to someone
+with Alzheimer’s so severe that they will forget what they are talking about mid-sentence.
+In fact, our case is even worse, as the algorithm will forget every 3/4 words.</p>
+
+<p>So if we were to entirely ignore the previous problem, and assume every single text
+came from the exact same context, I highly doubt the sentence will still make logical
+sense, as the algorithm will possess no knowledge of what they’ve generated, 2 seconds ago.</p>
+
+<p>So now that we’ve discussed the Pros and Cons of Markov Chains, let’s see how we can
+implement it in code.</p>
+
+<h2 id="technical-implementation">Technical implementation</h2>
+
+<p>The implementation is actually quite simple. We will break down the text into
+tri-grams, which is essentially every sequential group of “3” (hence tri) words in a sentence.
+That might not make too much sense, so here is an example:</p>
+
+<p>Suppose we have this sentence: “Hello there, how are you?”</p>
+
+<p>The sentence will be broken down into the following:</p>
+
+<ul>
+  <li>Hello there, how</li>
+  <li>there, how are</li>
+  <li>how are you?</li>
+</ul>
+
+<p><em>The punctuations are there purely for ease of understanding, and will be removed
+in the actual dataset</em></p>
+
+<p>The last word in each tri-gram will be the “predicted state”. The algorithm will take in
+two words, search for a trigram whose first two words match, and will output the 
+third word in the tri-gram as its prediction.</p>
+
+<p>So how does the whole probability thing plays in?</p>
+
+<p>You see, when two tri-grams have the same first two words, but perhaps different
+(or even same) last word, the algorithm will not intuitively know which one to choose.
+To it, every single option makes sense, as that’s what people really say.
+So, instead, we will collate all “matched” tri-grams, and randomly
+select one to be the predicted word. This way, the more identical tri-grams
+you have, the higher the chance that particular tri-gram will be picked.</p>
+
+<p>That’s it, that’s all there is to it. 
+<a href="https://github.com/thebowenfeng/markov_chatbot-new-">Here is my implementation</a>
+, along with some scraping code to obtain the corpus.</p>
+
+<h2 id="final-thoughts">Final thoughts</h2>
+
+<p>Whilst it is an interesting experiment, pure probabilities obviously do not
+cut it when dealing with something as complex and nuanced as human languages. 
+However, it is important to recognize that some concepts used in Markov Chains,
+such as previous states, is also used in more modern approaches, such as RNNs.</p>
+
+<p>Of course, it is possible to make some improvements upon this bare-metal model. 
+For instance, you could restrict the algorithm to select only tri-grams belonging 
+in the same “context” (which will require some manual labelling), in order
+to improve its “make-sense-ness”. However, even with such improvements,
+or whichever improvement you might’ve thought of, it is unlikely there will
+be any fruitful results from such a rudimentary algorithm.</p>
+
+<p>So, for now, Markov Chains chatbot will remain, a fun experiment.</p>
+
+
+    </div>
+
+</article>
+<div class="post-nav">
+<a class="previous" href="/projects/web%20automation/2019/09/18/typeracer-hack.html" title="Using web drivers to automate typing races in Python">Using web drivers to automate typing...</a><a class="next" href="/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html" title="Performing a mid-function trampoline hook using C++">Performing a mid-function trampoline hook using...</a>
+</div>
+<div class="post-related">
+      <div>Related Articles</div>
+      <ul>
+        <li><a class="post-link" href="/projects/dynamic%20memory/2021/10/15/custom-malloc.html" title="Performing a mid-function trampoline hook using C++">Writing a custom malloc and free implementation using C</a></li>
+<li><a class="post-link" href="/projects/nlp/2020/01/17/markov-chatbot.html" title="Performing a mid-function trampoline hook using C++">Using Markov Chains to simulate human speech</a></li>
+<li><a class="post-link" href="/projects/web3.0/2022/02/07/p2p-chat.html" title="Performing a mid-function trampoline hook using C++">Decentralized peer-to-peer chatting using Python</a></li>
+<li><a class="post-link" href="/projects/ai/2021/09/29/musegen.html" title="Performing a mid-function trampoline hook using C++">Generating Music using Recurrent Neural Networks</a></li>
+</ul>
+    </div>
+<div class="post-comments"></div></section>
+</div>
+
+
+  </section>
+  <section class="sidebar" style="margin-left: 15px;">
+    <!-- Get sidebar items --><style type="text/css" media="screen">
+.post-menu ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+</style>
+
+<div class="post-menu">
+  <div class="post-menu-title">TOC</div>
+  <div class="post-menu-content"></div>
+</div>
+
+<script>
+  function generateContent() {
+    var menu = document.querySelector(".post-menu");
+    var menuContent =  menu.querySelector(".post-menu-content");
+    var headings = document.querySelector(".post-content").querySelectorAll("h2, h3, h4, h5, h6");
+
+    // Hide menu when no headings
+    if (headings.length === 0) {
+      return menu.style.display = "none";
+    }
+
+    // Generate post menu
+    var menuHTML = '';
+    for (var i = 0; i < headings.length; i++) {
+      var h = headings[i];
+      menuHTML += (
+        '<li class="h-' + h.tagName.toLowerCase() + '">'
+        + '<a href="#h-' + h.getAttribute('id') + '">' + h.textContent + '</a></li>');
+    }
+
+    menuContent.innerHTML = '<ul>' + menuHTML + '</ul>';
+
+    // The header element
+    var header = document.querySelector('header.site-header');
+
+    function doMenuCollapse(index, over_items) {
+      var items = menuContent.firstChild.children;
+
+      if (over_items == undefined) {
+        over_items = 20;
+      }
+
+      if (items.length < over_items) {
+        return;
+      }
+
+      var activeItem = items[index];
+      var beginItem = activeItem
+      var endItem = activeItem
+      var beginIndex = index;
+      var endIndex = index + 1;
+      while (beginIndex >= 0
+        && !items[beginIndex].classList.contains('h-h2')) {
+        beginIndex -= 1;
+      }
+      while (endIndex < items.length
+        && !items[endIndex].classList.contains('h-h2')) {
+        endIndex += 1;
+      }
+      for (var i = 0; i < beginIndex; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+      for (var i = beginIndex + 1; i < endIndex; i++) {
+        item = items[i]
+        // if (!item.classList.contains('h-h2')) {
+          item.style.display = '';
+        // }
+      }
+      for (var i = endIndex; i < items.length; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+    }
+
+    // Init menu collapsed
+    doMenuCollapse(-1);
+
+    // Active the menu item
+    window.addEventListener('scroll', function (event) {
+      var lastActive = menuContent.querySelector('.active');
+      var changed = true;
+      var activeIndex = -1;
+      for (var i = headings.length - 1; i >= 0; i--) {
+        var h = headings[i];
+        var headingRect = h.getBoundingClientRect();
+        var headerRect = header.getBoundingClientRect();
+        var headerTop = Math.floor(headerRect.top);
+        var headerHeight = Math.floor(headerRect.height);
+        var headerHeight = headerTop + headerHeight + 20;
+        if (headingRect.top <= headerHeight) {
+          var id = 'h-' + h.getAttribute('id');
+          var a = menuContent.querySelector('a[href="#' + id  + '"]');
+          var curActive = a.parentNode;
+          if (curActive) {
+            curActive.classList.add('active');
+            activeIndex = i;
+          }
+          if (lastActive == curActive) {
+            changed = false;
+          }
+          break;
+        }
+      }
+      if (changed) {
+        if (lastActive) {
+          lastActive.classList.remove('active');
+        }
+        doMenuCollapse(activeIndex);
+      }
+      event.preventDefault();
+    });
+  }
+  generateContent();
+</script>
+</section>
+</div>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/"></data>
+
+  <div class="wrapper">
+    <div class="site-footer-inner">
+<div>Copyright <span class="copyleft">©</span> 2017-2024 Bowen Feng</div>
+      <div>Powered by <a title="Jekyll is a simple, blog-aware, static site
+      generator." href="http://jekyllrb.com/">Jekyll</a> &amp; <a title="Yat, yet
+      another theme." href="https://github.com/jeffreytse/jekyll-theme-yat">Yat Theme</a>.</div>
+      <div class="footer-col rss-subscribe">Subscribe <a href="/feed.xml">via RSS</a>
+</div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

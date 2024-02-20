@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="google-translate-customization" content="108d9124921d80c3-80e20d618ff053c8-g4f02ec6f3dba68b7-c">
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Performing a mid-function trampoline hook using C++ | Bowen’s Blog</title>
+<meta name="generator" content="Jekyll v4.3.3">
+<meta property="og:title" content="Performing a mid-function trampoline hook using C++">
+<meta name="author" content="Bowen Feng">
+<meta property="og:locale" content="en_US">
+<meta name="description" content="Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be performed on the first byte of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.">
+<meta property="og:description" content="Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be performed on the first byte of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.">
+<link rel="canonical" href="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html">
+<meta property="og:url" content="https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html">
+<meta property="og:site_name" content="Bowen’s Blog">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2020-05-13T00:00:00+00:00">
+<meta name="twitter:card" content="summary">
+<meta property="twitter:title" content="Performing a mid-function trampoline hook using C++">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","author":{"@type":"Person","name":"Bowen Feng"},"dateModified":"2020-05-13T00:00:00+00:00","datePublished":"2020-05-13T00:00:00+00:00","description":"Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be performed on the first byte of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.","headline":"Performing a mid-function trampoline hook using C++","mainEntityOfPage":{"@type":"WebPage","@id":"https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html"},"url":"https://blog.bowenfeng.xyz/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html"}</script>
+<!-- End Jekyll SEO tag -->
+<link rel="shortcut icon" href="">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/typeface-noto-sans@0.0.72/index.min.css">
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <script src="/assets/js/main.js"></script><link type="application/atom+xml" rel="alternate" href="https://blog.bowenfeng.xyz/feed.xml" title="Bowen's Blog">
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/styles/default.min.css">
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/highlight.min.js"></script>
+<!-- and it's easy to individually load additional languages -->
+<script charset="UTF-8" src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.1/languages/go.min.js"></script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+// Init highlight js
+document.addEventListener('DOMContentLoaded', function(event) {
+  var els = document.querySelectorAll('pre code')
+
+  function addLangData(block) {
+    var outer = block.parentElement.parentElement.parentElement;
+    var lang = block.getAttribute('data-lang');
+    for (var i = 0; i < outer.classList.length; i++) {
+      var cls = outer.classList[i];
+      if (cls.startsWith('language-')) {
+        lang = cls;
+        break;
+      }
+    }
+    if (!lang) {
+      cls = block.getAttribute('class');
+      lang = cls ? cls.replace('hljs ', '') : '';
+    }
+    if (lang.startsWith('language-')) {
+      lang = lang.substr(9);
+    }
+    block.setAttribute('class', 'hljs ' + lang);
+    block.parentNode.setAttribute('data-lang', lang);
+  }
+
+  function addBadge(block) {
+    var enabled = ('true' || 'true').toLowerCase();
+    if (enabled == 'true') {
+      var pre = block.parentElement;
+      pre.classList.add('badge');
+    }
+  }
+
+  function handle(block) {
+    addLangData(block);
+    addBadge(block)
+    hljs.highlightBlock(block);
+  }
+
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    handle(el);
+  }
+});
+</script>
+
+<style>
+  /* code language badge */
+  pre.badge::before {
+    content: attr(data-lang);
+    color: #fff;
+    background-color: #ff4e00;
+    padding: 0 .5em;
+    border-radius: 0 2px;
+    text-transform: uppercase;
+    text-align: center;
+    min-width: 32px;
+    display: inline-block;
+    position: absolute;
+    right: 0;
+  }
+
+  /* fix wrong badge display for firefox browser */
+  code > table pre::before {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<header class="site-header " role="banner">
+
+  <div class="wrapper">
+    <div class="site-header-inner">
+<span class="site-brand"><a class="site-brand-inner" rel="author" href="/">
+  <img class="site-favicon" title="Bowen's Blog" src="" onerror="this.style.display='none'">
+  Bowen's Blog
+</a>
+</span><nav class="site-nav">
+          <input type="checkbox" id="nav-trigger" class="nav-trigger">
+          <label for="nav-trigger">
+            <span class="menu-icon">
+              <svg viewbox="0 0 18 15" width="18px" height="15px">
+                <path d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.032C17.335,0,18,0.665,18,1.484L18,1.484z M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.032C17.335,6.031,18,6.696,18,7.516L18,7.516z M18,13.516C18,14.335,17.335,15,16.516,15H1.484 C0.665,15,0,14.335,0,13.516l0,0c0-0.82,0.665-1.483,1.484-1.483h15.032C17.335,12.031,18,12.695,18,13.516L18,13.516z"></path>
+              </svg>
+            </span>
+          </label>
+
+          <div class="trigger">
+<a class="page-link" href="/about.html">ABOUT</a><a class="page-link" href="/archives.html">ARCHIVES</a><a class="page-link" href="/categories.html">CATEGORIES</a><a class="page-link" href="/">HOME</a><a class="page-link" href="/tags.html">TAGS</a>
+
+
+
+
+
+
+
+
+
+<span class="page-link">
+
+
+
+<div id="google_translate_element" style="display: none;">
+</div>
+
+<span class="ct-language">
+  <ul class="list-unstyled ct-language-dropdown">
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="en">
+          
+          <img src="https://cdn.countryflags.com/thumbs/united-states-of-america/flag-400.png" title="English">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="fr">
+          
+          <img src="https://cdn.countryflags.com/thumbs/france/flag-400.png" title="French">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="zh-CN">
+          
+          <img src="https://cdn.countryflags.com/thumbs/china/flag-400.png" title="Chinese(Simple)">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ja">
+          
+          <img src="https://cdn.countryflags.com/thumbs/japan/flag-400.png" title="Japanese">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ko">
+          
+          <img src="https://cdn.countryflags.com/thumbs/south-korea/flag-400.png" title="Korean">
+          
+        </a>
+      </li>
+    
+      <li>
+        <a href="#" class="lang-select" data-lang="ru">
+          
+          <img src="https://cdn.countryflags.com/thumbs/russia/flag-400.png" title="Russian">
+          
+        </a>
+      </li>
+    
+  </ul>
+</span>
+
+<script type="text/javascript">
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement({
+    pageLanguage: 'en',
+    autoDisplay: false,
+    layout: google.translate.TranslateElement.InlineLayout.VERTICAL
+  }, 'google_translate_element');
+
+  // Links to cross-origin destinations are unsafe
+  var gll = document.getElementsByClassName('goog-logo-link')[0];
+  if (gll) {
+    gll.setAttribute('rel', 'noopener');
+  }
+
+  function restoreLang() {
+    var iframe = document.getElementsByClassName('goog-te-banner-frame')[0];
+    if (!iframe) return;
+
+    var innerDoc = iframe.contentDocument || iframe.contentWindow.document;
+    var restore_el = innerDoc.getElementsByTagName("button");
+
+    for (var i = 0; i < restore_el.length; i++) {
+      if (restore_el[i].id.indexOf("restore") >= 0) {
+        restore_el[i].click();
+        var close_el = innerDoc.getElementsByClassName("goog-close-link");
+        close_el[0].click();
+        return;
+      }
+    }
+  }
+
+  function triggerHtmlEvent(element, eventName) {
+    var event;
+    if (document.createEvent) {
+      event = document.createEvent('HTMLEvents');
+      event.initEvent(eventName, true, true);
+      element.dispatchEvent(event);
+    } else {
+      event = document.createEventObject();
+      event.eventType = eventName;
+      element.fireEvent('on' + event.eventType, event);
+    }
+  }
+
+  var googleCombo = document.querySelector("select.goog-te-combo");
+  var langSelect = document.querySelector('.ct-language');
+  langSelect.addEventListener('click', function(event) {
+    if (!event.target) {
+      return;
+    }
+
+    var selected = document.querySelector('.ct-language .ct-language-selected');
+    if (selected) {
+      selected.classList.remove('ct-language-selected');
+    }
+
+    var target = event.target;
+    while (target && target !== langSelect ) {
+      if (target.matches('.lang-select')) {
+        break;
+      }
+      target = target.parentElement;
+    }
+
+    if (target && target.matches('.lang-select')) {
+      var lang = target.getAttribute('data-lang');
+      if (googleCombo.value == lang) {
+        restoreLang();
+      } else {
+        target.parentElement.classList.add('ct-language-selected');
+        googleCombo.value = lang;
+        triggerHtmlEvent(googleCombo, 'change');
+      }
+    }
+
+    event.preventDefault();
+  });
+}
+</script>
+
+<script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+</span>
+</div>
+        </nav>
+</div>
+  </div>
+</header>
+
+<script>
+  function initHeader() {
+    var lastScrollY = getScrollPos().y;
+    var documentElement = document.documentElement;
+
+    function storeScrollData() {
+      var y = getScrollPos().y;var scrollStatus = "";
+
+      if (y <= 0) {
+        scrollStatus = "top";
+      } else if ((window.innerHeight + y) >= document.body.offsetHeight) {
+        scrollStatus = "bottom";
+      } else {
+        var isScrollDown = (y - lastScrollY > 0) ? true : false;
+        scrollStatus = isScrollDown ? "down" : "up";
+      }
+
+      lastScrollY = y;
+      documentElement.setAttribute("data-scroll-status", scrollStatus);
+    }
+
+    window.addEventListener('scroll', function(e) {
+      storeScrollData();
+    });
+
+    storeScrollData();
+  }
+  document.addEventListener('DOMContentLoaded', initHeader);
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+  function hashLocate(hashValue) {
+    hashValue = hashValue.replace(/^.*#h-/, '');
+    hashValue = decodeURIComponent(hashValue);
+    var element = document.getElementById(hashValue);
+
+    if (!element) {
+      return;
+    }
+
+    var header = document.querySelector('header.site-header');
+    var headerRect = header.getBoundingClientRect();
+    var headerTop = Math.floor(headerRect.top);
+    var headerHeight = Math.floor(headerRect.height);
+    var scrollPos = getScrollPos();
+    var offsetY = element.offsetTop - (headerTop + headerHeight + 20);
+
+    if (offsetY == scrollPos.y) {
+      return;
+    }
+
+    if (headerTop == 0  && offsetY > scrollPos.y) {
+      offsetY += headerHeight + 2;
+    } else if (headerTop < 0  && offsetY < scrollPos.y) {
+      offsetY -= headerHeight - 2;
+    }
+
+    smoothScrollTo(offsetY);
+  }
+
+  // The first event occurred
+  window.addEventListener('load', function(event) {
+    if (window.location.hash) {
+      hashLocate(window.location.hash);
+    }
+  });
+
+  // The first event occurred
+  window.addEventListener('click', function(event) {
+    if (event.target.tagName.toLowerCase() == 'a') {
+      hashLocate(event.target.getAttribute('href'));
+    }
+  });
+</script>
+<div class="theme-toggle">
+  <input type="checkbox" id="theme-switch">
+  <label for="theme-switch">
+    <div class="toggle"></div>
+    <div class="names">
+      <p class="light">Light</p>
+      <p class="dark">Dark</p>
+    </div>
+  </label>
+</div>
+
+
+
+
+<script>
+  (function() {
+    var sw = document.getElementById('theme-switch');
+    var html = document.getElementsByTagName('html')[0];
+    var nightModeOption = ('auto' || 'auto').toLowerCase();
+    var storage = nightModeOption === 'manual'
+        ? localStorage
+        : sessionStorage;
+    var themeData = loadThemeData();
+
+    function saveThemeData(data) {
+      storage.setItem('theme', JSON.stringify(data));
+    }
+
+    function loadThemeData() {
+      var data = storage.getItem('theme');
+      try {
+        data = JSON.parse(data ? data : '');
+      } catch(e) {
+        data = { nightShift: undefined, autoToggleAt: 0 };
+        saveThemeData(data);
+      }
+      return data;
+    }
+
+    function handleThemeToggle(nightShift) {
+      themeData.nightShift = nightShift;
+      saveThemeData(themeData);
+      html.dataset.theme = nightShift ? 'dark' : 'light';
+      setTimeout(function() {
+        sw.checked = nightShift ? true : false;
+      }, 50);
+    }
+
+    function autoThemeToggle() {
+      // Next time point of theme toggle
+      var now = new Date();
+      var toggleAt = new Date();
+      var hours = now.getHours();
+      var nightShift = hours >= 19 || hours <=7;
+
+      if (nightShift) {
+        if (hours > 7) {
+          toggleAt.setDate(toggleAt.getDate() + 1);
+        }
+        toggleAt.setHours(7);
+      } else {
+        toggleAt.setHours(19);
+      }
+
+      toggleAt.setMinutes(0);
+      toggleAt.setSeconds(0);
+      toggleAt.setMilliseconds(0)
+
+      var delay = toggleAt.getTime() - now.getTime();
+
+      // auto toggle theme mode
+      setTimeout(function() {
+        handleThemeToggle(!nightShift);
+      }, delay);
+
+      return {
+        nightShift: nightShift,
+        toggleAt: toggleAt.getTime()
+      };
+    }
+
+    // Listen the theme toggle event
+    sw.addEventListener('change', function(event) {
+      handleThemeToggle(event.target.checked);
+    });
+
+    if (nightModeOption == 'auto') {
+      var data = autoThemeToggle();
+
+      // Toggle theme by local setting
+      if (data.toggleAt > themeData.autoToggleAt) {
+        themeData.autoToggleAt = data.toggleAt;
+        handleThemeToggle(data.nightShift);
+      } else {
+        handleThemeToggle(themeData.nightShift);
+      }
+    } else if (nightModeOption == 'manual') {
+      handleThemeToggle(themeData.nightShift);
+    } else {
+      var nightShift = themeData.nightShift;
+      if (nightShift === undefined) {
+        nightShift = nightModeOption === 'on';
+      }
+      handleThemeToggle(nightShift);
+    }
+  })();
+</script>
+<main class="page-content" aria-label="Content">
+      <div class="wrapper">
+        <div class="framework">
+  <section class="main">
+
+     <div class="post">
+  <section>
+
+
+
+
+
+
+
+
+
+<header class="post-header">
+  <h1 class="post-title p-name" itemprop="name headline">Performing a mid-function trampoline hook using C++</h1>
+  <h2 class="post-subtitle"></h2>
+
+  <p class="post-meta">
+    <time class="dt-published" datetime="2020-05-13T00:00:00+00:00" itemprop="datePublished"><i class="fa fa-calendar"></i> May 13, 2020
+    </time>
+
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <span class="post-reading-time left-vsplit"><i class="fa fa-clock-o"></i> About 16 mins</span>
+  </p>
+<div class="post-tags">
+<a class="post-tag" href="/tags.html#C++">#C++</a><a class="post-tag" href="/tags.html#Reverse%20Engineering">#Reverse Engineering</a><a class="post-tag" href="/tags.html#Hacking">#Hacking</a>
+</div></header>
+<article class="post h-entry" itemscope itemtype="http://schema.org/BlogPosting">
+
+    <div class="post-content e-content" itemprop="articleBody">
+
+      <p>Hooking, function hooking or function detouring, refers to the act of rerouting a program’s code execution in order to modify the behavior of a particular function, or intercept its parameters. It is a very popular technique used by reverse engineers, hackers and the likes, and could be very powerful when used correctly. Trampoline hooking is a newer technique that utilizes a “gateway” in order to bypass the need to write inline ASM and manually perform a detour. However, one disadvantage it has compared to a traditional detour, is it has to be <strong>performed on the first byte</strong> of a given function, in order to maintain stack integrity. In today’s article, we will explore an alternative method in order to perform a “mid-function” trampoline hook.</p>
+
+<p><a href="https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265">Full code gist is here</a></p>
+
+<h3 id="what-exactly-is-trampoline-hooking">What exactly is trampoline hooking?</h3>
+<p>As you may already know, a normal detour is simply some clever code that will force the program to redirect its flow of execution, hence <strong>detouring</strong>. Here is a rough diagram of how it is done:
+<img src="https://i.imgur.com/9HLPLsx.png" alt="detour">
+By changing a few bytes of the original program’s code, we can place a jump that jumps to our function, executes our code, then jumps back. This method is straightforward, and very hard to detect. However, it has a few drawbacks:</p>
+<ul>
+  <li>Function can only be written as in-line ASM, cannot have prologues/epilogues and must not distrub the stack in any form or way.</li>
+  <li>Most compilers do not support x64 inline-ASM (such as MSVC). The ones that do support (clang) it does not support the “naked” attribute (which removes prologues/epilogues), meaning you have to manually remove the prologue, at the very least.</li>
+</ul>
+
+<p>It is for these reasons that many people nowadays often opt in for a newer technique, called <strong>trampoline hooking</strong>. Trampoline hooking will roughly look like this:
+<img src="https://i.imgur.com/vquFLQd.png" alt="Tramp hook">
+Similar to a standard detour, the code execution flow is redirected via a jump. However, as opposed to a few lines of assembly code, the “hook function” can be a full-fledged function that is able to perform any computation. At the end, it will redirect to a gateway, which will restore the stack by executing the stolen bytes, and jump back to the original function.</p>
+
+<p>The benefits of a trampoline hook, of course, no need to write assembly (yuck), and overall greater possibility as you do not have to worry about keeping the stack intact; the compiler will automatically clean up the stack for you after executing your hook function. However, the downside is:</p>
+<ul>
+  <li>You can only place your hook <strong>on the first byte</strong> of the target function, as the stack has to be <em>pristine</em> in order for this to work.</li>
+</ul>
+
+<p>Well, what if I told you we actually don’t have to necessarily perform it on the first byte, with some clever tricks? 
+But first, let’s discuss the motivation behind this
+<img src="https://external-preview.redd.it/BiDC1ZxXOw4lP0nwG8WBEJcJ-paiZeF3qq2msUqTftU.jpg?auto=webp&s=95758fef805cfeb23ee971f1174c666284795dc2" alt="shocked"></p>
+<h3 id="why-is-mid-function-hooking-so-important">Why is mid-function hooking so important</h3>
+<p>You see, sometimes developers don’t necessarily want people messing around with their program. DRMs and AntiCheats are some of the more common measures to prevent people from “hacking” certain programs. Although in most cases their concerns are valid, in rare cases, there might be a legitimate case for someone to “illegally” modify a program. Anyhow, this article isn’t an ethics debate, so continuing on…</p>
+
+<p>One of the most common techniques anti-cheats (or similar programs) use is checking the first byte of functions. Anti-cheat developers also realize how lucrative function hooking is, and because most people have to resort to trampoline hooking, they realized that checking the integrity of the first byte is a very efficient and effective solution. It is not computationally demanding (at least compared to checking every byte), and it directly stops most people from performing trampoline hooks.</p>
+
+<p>So, if one manages to find a way to place their trampoline hook, even just a few bytes down, it would completely circumvent their entire detection vector, at least in theory. There are far more effective ways to prevent WPM (write process memory), but not every anti-cheat is equipped with them, so such knowledge is still relevant.</p>
+
+<h3 id="so-how-do-we-do-it">So how do we do it?</h3>
+<p>Stack integrity is everything when it comes to hooking. If you modify the stack without the program’s knowledge, it can lead to catastrophic failures. It is precisely the reason why trampoline hooks cannot be performed lower down in the function, as our “hook” function expects a clean stack. So, as long as we can figure out a way to “clean” the stack, so to speak, we can theoretically perform our trampoline hook anywhere. In practice, there are certain soft limitations, which will become apparent later. So, let’s get started!</p>
+
+<h3 id="the-victim-program">The victim program</h3>
+<p>I have developed a very simple testing program for the purpose of this article. However, in practice, the workflow should be extremely similar. Here is what is looks like:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#include</span> <span class="cpf">&lt;iostream&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;Windows.h&gt;</span><span class="cp">
+</span>
+<span class="kt">int</span> <span class="nf">toHook</span><span class="p">(</span><span class="kt">int</span> <span class="n">myInteger</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">myInteger</span> <span class="o">=</span> <span class="n">myInteger</span> <span class="o">+</span> <span class="mi">5</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">myInteger</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">value</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">while</span> <span class="p">(</span><span class="nb">true</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">GetKeyState</span><span class="p">(</span><span class="n">VK_SPACE</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x8000</span><span class="p">)</span>
+        <span class="p">{</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="n">toHook</span><span class="p">(</span><span class="n">value</span><span class="p">);</span>
+            <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="n">value</span><span class="p">;</span>
+            <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+            <span class="n">Sleep</span><span class="p">(</span><span class="mi">100</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>The goal, by the end, is to hook the “toHook” function (duh) and hopefully also modify its parameter value. Right now it is incrementing the parameter by 5, let’s see if we can change that to 100.</p>
+
+<h3 id="reversing-the-function">Reversing the function</h3>
+<p>Firing up a debugger, we can easily see the function’s assembly code:
+<img src="https://i.imgur.com/XKtnEYu.png" alt="asm code">
+It looks like a very standard cdecl prologue (because it is). Normally you just have to count 5 bytes and nop all associated instructions, but since we wanted to place our hook lower down, we ultimately need to find a way to maintain a clean stack.</p>
+
+<p>Now you might say “Hold on a second, can’t we just pop the ebp and then place our hook after”? And you would be 100% correct. Like I said, as long as you maintain a clean stack, it doesn’t matter where you put your hook. Obviously, maintaining a clean stack gets exponentially more difficult, the lower you go. However, in this case, you can see we could quite easily clean the stack all the way up to <code class="language-plaintext highlighter-rouge">push edi</code>, as most of these instructions are push, meaning reversing them is as easy as just having a corresponding pop. But, in our case, for this PoC, we will simply just place our function after the <code class="language-plaintext highlighter-rouge">mov</code> instruction.</p>
+
+<p>Here is what the flow should look like</p>
+<ol>
+  <li>Replace <code class="language-plaintext highlighter-rouge">sub esp, 000000C0</code> with <code class="language-plaintext highlighter-rouge">pop ebp</code> and a <code class="language-plaintext highlighter-rouge">jmp</code> instruction, jumping to your hook function. Make sure you <strong>do not</strong> overwrite the <code class="language-plaintext highlighter-rouge">mov</code> instruction as that is still required to maintain stack integrity.</li>
+  <li>Execute our hook function, do whatever we want, and eventually jump to our gateway</li>
+  <li>In our gateway, execute all the bytes from the beginning of our function, in order to restore the stack. Typically, we would only need to execute the “stolen bytes” (bytes overwritten for our <code class="language-plaintext highlighter-rouge">jmp</code>), but in this case, all bytes needs to be overwritten, as we purposely cleaned the stack.</li>
+  <li>Jump back after our <code class="language-plaintext highlighter-rouge">jmp</code> instruction, just as normal.</li>
+</ol>
+
+<p>Voila, you just performed a trampoline hook mid-function.</p>
+
+<h3 id="the-technical-implementation">The technical implementation</h3>
+
+<p>The PoC code could be found <a href="https://gist.github.com/thebowenfeng/1af710c332b75c9195ed06eb9945e265">here</a>. However, I would encourage attempting to implement this yourself.</p>
+
+<p><em>The above DLL code is written to be injected into a 32-bit (x86) process. This may or may not work on a 64 bit process, due to 64 bit addresses taking up 8 bytes as opposed to 4, which means the relative jump will only work for addresses within the 4GB range.</em></p>
+
+<p>We’ll start with some fairly standard template code for a DLL, which defining an entry point, and creating a Thread for our code:</p>
+
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">BOOL</span> <span class="n">APIENTRY</span> <span class="nf">DllMain</span><span class="p">(</span> <span class="n">HMODULE</span> <span class="n">hModule</span><span class="p">,</span>
+                       <span class="n">DWORD</span>  <span class="n">ul_reason_for_call</span><span class="p">,</span>
+                       <span class="n">LPVOID</span> <span class="n">lpReserved</span>
+                     <span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">switch</span> <span class="p">(</span><span class="n">ul_reason_for_call</span><span class="p">)</span>
+    <span class="p">{</span>
+    <span class="k">case</span> <span class="n">DLL_PROCESS_ATTACH</span><span class="p">:</span>
+        <span class="n">CreateThread</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">MainThread</span><span class="p">,</span> <span class="n">hModule</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+        <span class="k">break</span><span class="p">;</span>
+    <span class="k">case</span> <span class="n">DLL_THREAD_ATTACH</span><span class="p">:</span>
+    <span class="k">case</span> <span class="n">DLL_THREAD_DETACH</span><span class="p">:</span>
+    <span class="k">case</span> <span class="n">DLL_PROCESS_DETACH</span><span class="p">:</span>
+        <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">TRUE</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>Next, we need to create a function that is able to allocate a code cave and write our stolen bytes. The function is as follows:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">BYTE</span><span class="o">*</span> <span class="nf">trampoline</span><span class="p">(</span><span class="n">BYTE</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">BYTE</span><span class="o">*</span> <span class="n">dest</span><span class="p">,</span> <span class="kt">int</span> <span class="n">len</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">len</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">)</span> <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="n">BYTE</span><span class="o">*</span> <span class="n">gateway</span> <span class="o">=</span> <span class="p">(</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">VirtualAlloc</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">len</span> <span class="o">+</span> <span class="mi">5</span><span class="p">,</span> <span class="n">MEM_COMMIT</span> <span class="o">|</span> <span class="n">MEM_RESERVE</span><span class="p">,</span> <span class="n">PAGE_EXECUTE_READWRITE</span><span class="p">);</span>
+
+    <span class="n">memcpy_s</span><span class="p">(</span><span class="n">gateway</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">relativeAddr</span> <span class="o">=</span> <span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-</span> <span class="n">gateway</span> <span class="o">-</span> <span class="mi">5</span><span class="p">;</span>
+
+    <span class="o">*</span><span class="p">(</span><span class="n">gateway</span> <span class="o">+</span> <span class="n">len</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0xE9</span><span class="p">;</span>
+    <span class="o">*</span><span class="p">(</span><span class="kt">uintptr_t</span><span class="o">*</span><span class="p">)((</span><span class="kt">uintptr_t</span><span class="p">)</span><span class="n">gateway</span> <span class="o">+</span> <span class="n">len</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">=</span> <span class="n">relativeAddr</span><span class="p">;</span>
+
+    <span class="n">detour</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="n">gateway</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>There are a couple things worthy of attention. First, your “length” cannot be less than 5, as that is the size of the <code class="language-plaintext highlighter-rouge">jmp</code> instructions + a 4 byte address. <code class="language-plaintext highlighter-rouge">VirtualAlloc</code> is more or less a <code class="language-plaintext highlighter-rouge">malloc</code> in C, except that it offers more control, as it is a winAPI function. We require read &amp; write permission, hence <code class="language-plaintext highlighter-rouge">PAGE_EXECUTE_READWRITE</code>. The rest of the code is simply a matter of copying the “stolen bytes” (which is the bytes from the start of the function till the last instruction we overwritten), and then placing a jmp at the end, to jump back to the original function.</p>
+
+<p>Now you may wonder what the “detour” function is doing. This is a left-over piece of code I had written for a standard function detour. It essentially just writes a <code class="language-plaintext highlighter-rouge">jmp</code> instruction and calculates the relative address to the destination. <code class="language-plaintext highlighter-rouge">detour</code> is what will modify the original function and forces it to redirect to our “hook” function. So here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">bool</span> <span class="nf">detour</span><span class="p">(</span><span class="n">BYTE</span><span class="o">*</span> <span class="n">src</span><span class="p">,</span> <span class="n">BYTE</span><span class="o">*</span> <span class="n">dst</span><span class="p">,</span> <span class="kt">int</span> <span class="n">len</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">len</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">)</span> <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+
+    <span class="n">DWORD</span> <span class="n">currProtect</span><span class="p">;</span>
+    <span class="n">VirtualProtect</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">PAGE_EXECUTE_READWRITE</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">currProtect</span><span class="p">);</span>
+     
+    <span class="o">*</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0x5D</span><span class="p">;</span> <span class="c1">// pop ebp</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">relativeAddr</span> <span class="o">=</span> <span class="n">dst</span> <span class="o">-</span> <span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span> <span class="o">-</span> <span class="mi">5</span><span class="p">;</span> <span class="c1">// Relative jump offsetted by 4</span>
+    <span class="o">*</span><span class="p">(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span> <span class="o">=</span> <span class="mh">0xE9</span><span class="p">;</span> <span class="c1">// Start jump 4 bytes in</span>
+
+    <span class="o">*</span><span class="p">(</span><span class="kt">uintptr_t</span><span class="o">*</span><span class="p">)(</span><span class="n">src</span> <span class="o">+</span> <span class="mi">5</span><span class="p">)</span> <span class="o">=</span> <span class="n">relativeAddr</span><span class="p">;</span>
+
+    <span class="n">VirtualProtect</span><span class="p">(</span><span class="n">src</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">currProtect</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">currProtect</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>You may see some similarities between certain code in this function, and in the trampoline function. Most of it is fairly straightforward, <code class="language-plaintext highlighter-rouge">VirtualProtect</code> allows us to write to places in memory where we normally cannot write to. In order to restore the stack, we need to <code class="language-plaintext highlighter-rouge">pop ebp</code>, so we simply overwrite the 4th byte with <code class="language-plaintext highlighter-rouge">0x5D</code> (instruction for pop ebp). Then, at the 5th byte, we start writing our <code class="language-plaintext highlighter-rouge">jmp</code> instruction. The relative address will be 5 bytes after the <code class="language-plaintext highlighter-rouge">jmp</code> instruction, which together with the 4 byte offset, will become 9 bytes.</p>
+
+<p>Finally, we need to write our hook function, which is actually the easiest part. Here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">typedef</span> <span class="nf">int</span><span class="p">(</span><span class="kr">__cdecl</span><span class="o">*</span> <span class="n">toHook_t</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span> <span class="n">a1</span><span class="p">);</span>
+<span class="n">toHook_t</span> <span class="n">origFunc</span><span class="p">;</span>
+
+<span class="kt">int</span> <span class="kr">__cdecl</span> <span class="nf">hookFunc</span><span class="p">(</span><span class="kt">int</span> <span class="n">a1</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"Current value: "</span> <span class="o">&lt;&lt;</span> <span class="n">a1</span><span class="p">;</span>
+    <span class="n">std</span><span class="o">::</span><span class="n">cout</span> <span class="o">&lt;&lt;</span> <span class="s">"</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">origFunc</span><span class="p">(</span><span class="n">a1</span> <span class="o">+</span> <span class="mi">100</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>We’ll define a function pointer, to the original hook function. The calling convention (in this case <code class="language-plaintext highlighter-rouge">__cdecl</code> ) is very important as it has to be consistent. Different calling conventions have different methods of cleaning the stack. Some requires the caller to clean, whilst others requires the callee. In any case, you would most likely need to perform some static analysis using IDA Pro or similar, in order to confirm a function’s calling convention. The reason why we are “returning” in our hook function, is to allow the compiler to generate code <strong>as if</strong> we were calling the function, which means once we restore the stack, the original program will have no clue anything even happened. This is the beauty of trampoline hooking. We have the complete freedom to intercept and pass in bogus values, and the program will not have any clue.</p>
+
+<p>The final step is to execute above said functions, in a main thread. Here is the code:</p>
+<div class="language-cpp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">DWORD</span> <span class="n">WINAPI</span> <span class="nf">MainThread</span><span class="p">(</span><span class="n">LPVOID</span> <span class="n">param</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">AllocConsole</span><span class="p">();</span>
+    <span class="kt">FILE</span><span class="o">*</span> <span class="n">f</span><span class="p">;</span>
+    <span class="n">freopen_s</span><span class="p">(</span><span class="o">&amp;</span><span class="n">f</span><span class="p">,</span> <span class="s">"CONOUT$"</span><span class="p">,</span> <span class="s">"w"</span><span class="p">,</span> <span class="n">stdout</span><span class="p">);</span>
+
+    <span class="kt">uintptr_t</span> <span class="n">baseAddr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">uintptr_t</span><span class="p">)</span><span class="n">GetModuleHandle</span><span class="p">(</span><span class="s">L"midFuncHookVictim.exe"</span><span class="p">);</span>
+
+    <span class="n">origFunc</span> <span class="o">=</span> <span class="p">(</span><span class="n">toHook_t</span><span class="p">)(</span><span class="n">baseAddr</span> <span class="o">+</span> <span class="mh">0x12500</span><span class="p">);</span>
+    <span class="n">origFunc</span> <span class="o">=</span> <span class="p">(</span><span class="n">toHook_t</span><span class="p">)</span><span class="n">trampoline</span><span class="p">((</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">origFunc</span><span class="p">,</span> <span class="p">(</span><span class="n">BYTE</span><span class="o">*</span><span class="p">)</span><span class="n">hookFunc</span><span class="p">,</span> <span class="mi">9</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>It is worth noting that we changed the address of the origFunc from its address in memory, to our gateway (as that is the return value of the trampoline). We need to ensure our hook function redirects to our gateway in order to prevent “hook recursion”. In other words, if we do not specify our gateway address, the hookFunc will simply jump back to the start of the function, and we will have an infinite loop.</p>
+
+<h3 id="closing-thoughts">Closing thoughts</h3>
+<p>The relative ease, with just a little bit more code and attention to reversing, makes this technique a very powerful technique when it comes to dealing with “anti-cheats”. Of course, as I have covered above, there are many other ways to prevent WPM aside from byte-checking, and of which are much more powerful and much harder to bypass. However, this is not to say that every single anti-tampering service is willing and able to implement more advanced checks. Byte checking is still a very prevalent techniques used by such programs, simply due to its ease of implementation, and relative efficiency. In any case, regardless of its usefulness, knowing an extra technique will not hurt anyone (maybe except the program you are attempting to modify).</p>
+
+
+
+    </div>
+
+</article>
+<div class="post-nav">
+<a class="previous" href="/projects/nlp/2020/01/17/markov-chatbot.html" title="Using Markov Chains to simulate human speech">Using Markov Chains to simulate human...</a><a class="next" href="/projects/ai/2021/09/29/musegen.html" title="Generating Music using Recurrent Neural Networks">Generating Music using Recurrent Neural Networks...</a>
+</div>
+<div class="post-related">
+      <div>Related Articles</div>
+      <ul>
+        <li><a class="post-link" href="/projects/web3.0/2022/02/07/p2p-chat.html" title="Generating Music using Recurrent Neural Networks">Decentralized peer-to-peer chatting using Python</a></li>
+<li><a class="post-link" href="/projects/reverse%20engineering/2020/05/13/midfunction-hooking.html" title="Generating Music using Recurrent Neural Networks">Performing a mid-function trampoline hook using C++</a></li>
+<li><a class="post-link" href="/projects/dynamic%20memory/2021/10/15/custom-malloc.html" title="Generating Music using Recurrent Neural Networks">Writing a custom malloc and free implementation using C</a></li>
+<li><a class="post-link" href="/projects/ai/computer%20vision/2022/01/07/ai-gamer.html" title="Generating Music using Recurrent Neural Networks">Using CNNs to autonomously play videogames</a></li>
+</ul>
+    </div>
+<div class="post-comments"></div></section>
+</div>
+
+
+  </section>
+  <section class="sidebar" style="margin-left: 15px;">
+    <!-- Get sidebar items --><style type="text/css" media="screen">
+.post-menu ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+</style>
+
+<div class="post-menu">
+  <div class="post-menu-title">TOC</div>
+  <div class="post-menu-content"></div>
+</div>
+
+<script>
+  function generateContent() {
+    var menu = document.querySelector(".post-menu");
+    var menuContent =  menu.querySelector(".post-menu-content");
+    var headings = document.querySelector(".post-content").querySelectorAll("h2, h3, h4, h5, h6");
+
+    // Hide menu when no headings
+    if (headings.length === 0) {
+      return menu.style.display = "none";
+    }
+
+    // Generate post menu
+    var menuHTML = '';
+    for (var i = 0; i < headings.length; i++) {
+      var h = headings[i];
+      menuHTML += (
+        '<li class="h-' + h.tagName.toLowerCase() + '">'
+        + '<a href="#h-' + h.getAttribute('id') + '">' + h.textContent + '</a></li>');
+    }
+
+    menuContent.innerHTML = '<ul>' + menuHTML + '</ul>';
+
+    // The header element
+    var header = document.querySelector('header.site-header');
+
+    function doMenuCollapse(index, over_items) {
+      var items = menuContent.firstChild.children;
+
+      if (over_items == undefined) {
+        over_items = 20;
+      }
+
+      if (items.length < over_items) {
+        return;
+      }
+
+      var activeItem = items[index];
+      var beginItem = activeItem
+      var endItem = activeItem
+      var beginIndex = index;
+      var endIndex = index + 1;
+      while (beginIndex >= 0
+        && !items[beginIndex].classList.contains('h-h2')) {
+        beginIndex -= 1;
+      }
+      while (endIndex < items.length
+        && !items[endIndex].classList.contains('h-h2')) {
+        endIndex += 1;
+      }
+      for (var i = 0; i < beginIndex; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+      for (var i = beginIndex + 1; i < endIndex; i++) {
+        item = items[i]
+        // if (!item.classList.contains('h-h2')) {
+          item.style.display = '';
+        // }
+      }
+      for (var i = endIndex; i < items.length; i++) {
+        item = items[i]
+        if (!item.classList.contains('h-h2')) {
+          item.style.display = 'none';
+        }
+      }
+    }
+
+    // Init menu collapsed
+    doMenuCollapse(-1);
+
+    // Active the menu item
+    window.addEventListener('scroll', function (event) {
+      var lastActive = menuContent.querySelector('.active');
+      var changed = true;
+      var activeIndex = -1;
+      for (var i = headings.length - 1; i >= 0; i--) {
+        var h = headings[i];
+        var headingRect = h.getBoundingClientRect();
+        var headerRect = header.getBoundingClientRect();
+        var headerTop = Math.floor(headerRect.top);
+        var headerHeight = Math.floor(headerRect.height);
+        var headerHeight = headerTop + headerHeight + 20;
+        if (headingRect.top <= headerHeight) {
+          var id = 'h-' + h.getAttribute('id');
+          var a = menuContent.querySelector('a[href="#' + id  + '"]');
+          var curActive = a.parentNode;
+          if (curActive) {
+            curActive.classList.add('active');
+            activeIndex = i;
+          }
+          if (lastActive == curActive) {
+            changed = false;
+          }
+          break;
+        }
+      }
+      if (changed) {
+        if (lastActive) {
+          lastActive.classList.remove('active');
+        }
+        doMenuCollapse(activeIndex);
+      }
+      event.preventDefault();
+    });
+  }
+  generateContent();
+</script>
+</section>
+</div>
+
+      </div>
+    </main><footer class="site-footer h-card">
+  <data class="u-url" href="/"></data>
+
+  <div class="wrapper">
+    <div class="site-footer-inner">
+<div>Copyright <span class="copyleft">©</span> 2017-2024 Bowen Feng</div>
+      <div>Powered by <a title="Jekyll is a simple, blog-aware, static site
+      generator." href="http://jekyllrb.com/">Jekyll</a> &amp; <a title="Yat, yet
+      another theme." href="https://github.com/jeffreytse/jekyll-theme-yat">Yat Theme</a>.</div>
+      <div class="footer-col rss-subscribe">Subscribe <a href="/feed.xml">via RSS</a>
+</div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
